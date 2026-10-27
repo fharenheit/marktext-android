@@ -38,6 +38,7 @@
 
 <p align="center">
   <a href="#highlights">Highlights</a> ·
+  <a href="#whats-new">What's new</a> ·
   <a href="#build-from-source">Build from source</a> ·
   <a href="#license--attribution">License</a>
 </p>
@@ -85,11 +86,11 @@ desktop, in an interface built for one hand.
 - **Never loses your work.** Autosave, recovery drafts, and atomic writes keep
   every change.
 
-- **Private by default.** No account, no cloud, no telemetry; everything stays on
-  the device.
+- **Private by default.** No account required and no telemetry; documents stay on
+  the device unless you open them from a cloud drive, GitHub, or a Git remote.
 
-- **Lightweight.** A Vue + Capacitor shell keeps the whole app around 7.8 MB —
-  small and light, yet fully featured.
+- **Lightweight.** A Vue + Capacitor shell keeps the whole app around 15 MB,
+  Git engine and bundled fonts included.
 
 </td>
 <td width="220" valign="top"><img src="docs/screenshots/editor-rich.webp" alt="Tables, code, and math rendered live while typing" width="200"></td>
@@ -156,16 +157,69 @@ desktop, in an interface built for one hand.
 </tr>
 </table>
 
+### Git and GitHub, on the phone
+
+- **Open, edit, and commit GitHub documents.** Sign in with the device flow or a
+  personal access token, browse repositories and branches, and save with an
+  explicit commit — optionally to a new branch with a pull request. Repository
+  images display even from private repositories.
+
+- **Local Git working copies.** Clone from GitHub or any HTTPS Git host, edit
+  offline, review diffs, revert, commit and push in one step, pull with
+  per-file conflict resolution, switch and create branches, and browse history.
+
+- **Source and WYSIWYG side by side.** A two-way split view with a draggable
+  splitter, plus "Pull & merge latest" with a three-way merge. Saving keeps the
+  document's own Markdown formatting on lines you did not touch.
+
+- **D2Coding Ligature** bundled as the default monospace and source font.
+
 ---
+
+## What's new
+
+Changes in this fork since it branched from upstream v0.2.1. Full notes are on
+the [Releases](https://github.com/fharenheit/marktext-android/releases) page.
+
+### v0.3.1 — fixes
+
+- **Data safety.** Deleting a repository no longer follows symbolic links;
+  aborting or completing a merge leaves unrelated uncommitted edits alone; the
+  split view, the file panel, and the formatting-preserving save no longer drop
+  edits.
+- **Security.** Sign-in tokens, saved Git passwords, and working copies are
+  excluded from Android backups.
+- **Git.** Publish a new branch with Push; commit & push runs as one guarded
+  step; network operations time out and no longer block autosave; merges keep
+  CRLF line endings; a failed pull restores the file in its own encoding.
+- **GitHub.** Protected-branch, SSO, missing-scope, and rate-limit refusals are
+  reported as such; a branch whose commit landed is never rolled back; the
+  image cache refreshes after commits; an unloadable shared link falls back to
+  a text draft.
+- **Polish.** Repository errors in all ten languages, an accessible splitter
+  with a larger touch target, and lighter line diffing on large documents.
+
+### v0.3.0 — Git and GitHub
+
+- GitHub documents: open, commit, new branch with pull request, repository
+  images, shared github.com links.
+- Local Git working copies with clone, diff, revert, commit, push, pull and
+  conflict resolution, branches, history, and a file panel.
+- Two-way source/WYSIWYG split view, Pull & merge latest, and formatting-
+  preserving saves.
+- Table, IME Enter, and inline SVG fixes; D2Coding Ligature; system font for
+  rendered text with separate monospace and source fonts.
 
 ## Project status
 
 > [!IMPORTANT]
-> Signed public releases are available. Each release APK is built by the
-> repository's release workflow, pinned to the official release certificate,
-> and passes clean-install and same-key upgrade checks before publishing.
+> Releases are built by the repository's release workflow. Until a release
+> keystore is configured they are **debug-signed** and install as a separate
+> app (`io.github.renakoni.marktextandroid.debug`) next to any upstream
+> install. v0.3.0 and v0.3.1 were each signed with a one-off key, so install
+> v0.3.1 fresh rather than over v0.3.0.
 
-Download signed builds from the
+Download builds from the
 [Releases](https://github.com/fharenheit/marktext-android/releases/latest) page.
 
 ## Build from source
