@@ -29,8 +29,8 @@ android {
         applicationId "io.github.renakoni.marktextandroid"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "0.2.1"
+        versionCode 4
+        versionName "0.3.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         resValue "string", "github_client_id", githubClientId
         aaptOptions {
