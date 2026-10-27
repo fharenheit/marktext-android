@@ -49,6 +49,8 @@ const branches = ref<RepositoryBranch[]>([])
 const newBranchName = ref('')
 const commits = ref<RepositoryCommit[]>([])
 const historyComplete = ref(false)
+const historyLoading = ref(false)
+let historyGeneration = 0
 
 /** Full-screen views stacked over the tabs; Back closes them first. */
 const fileDiff = ref<{ title: string; diff: RepositoryFileDiff } | null>(null)
@@ -78,7 +80,7 @@ async function operate<T>(name: string, operation: () => Promise<T>): Promise<T 
   try {
     return await operation()
   } catch (error) {
-    notice.value = getRepositoryUserMessage(error)
+    notice.value = getRepositoryUserMessage(error, props.repository.remoteUrl)
     return null
   } finally {
     busy.value = null
@@ -90,7 +92,7 @@ async function refreshStatus() {
   try {
     status.value = await callRepository(plugin => plugin.getRepositoryStatus({ id: id.value }))
   } catch (error) {
-    notice.value = getRepositoryUserMessage(error)
+    notice.value = getRepositoryUserMessage(error, props.repository.remoteUrl)
   }
 }
 
@@ -101,7 +103,7 @@ async function loadFolder() {
     ).entries
   } catch (error) {
     entries.value = []
-    notice.value = getRepositoryUserMessage(error)
+    notice.value = getRepositoryUserMessage(error, props.repository.remoteUrl)
   }
 }
 
@@ -109,11 +111,17 @@ async function loadBranches() {
   try {
     branches.value = (await callRepository(plugin => plugin.listRepositoryBranches({ id: id.value }))).branches
   } catch (error) {
-    notice.value = getRepositoryUserMessage(error)
+    notice.value = getRepositoryUserMessage(error, props.repository.remoteUrl)
   }
 }
 
 async function loadHistory(reset: boolean) {
+  // "Load more" waits for the page in flight; a reset supersedes it.
+  if (historyLoading.value && !reset) {
+    return
+  }
+  const generation = ++historyGeneration
+  historyLoading.value = true
   try {
     const page = (
       await callRepository(plugin =>
@@ -124,10 +132,19 @@ async function loadHistory(reset: boolean) {
         }),
       )
     ).commits
+    if (generation !== historyGeneration) {
+      return
+    }
     commits.value = reset ? page : [...commits.value, ...page]
     historyComplete.value = page.length < HISTORY_PAGE
   } catch (error) {
-    notice.value = getRepositoryUserMessage(error)
+    if (generation === historyGeneration) {
+      notice.value = getRepositoryUserMessage(error, props.repository.remoteUrl)
+    }
+  } finally {
+    if (generation === historyGeneration) {
+      historyLoading.value = false
+    }
   }
 }
 
@@ -203,26 +220,33 @@ async function openPushSheet() {
 }
 
 /**
- * Commit (when there are changes) and push as one step. A push that fails
- * after the commit keeps the commit locally; the header shows it waiting.
+ * Commit (when there are changes) and push as one step, under one busy
+ * lock so a second tap cannot start another commit or push. A push that
+ * fails after the commit keeps the commit locally; the header shows it
+ * waiting.
  */
 async function commitAndPush(message: string | null) {
-  if (message !== null) {
-    const created = await operate('push', () =>
-      callRepository(plugin => plugin.commitRepository({ id: id.value, message })),
-    )
-    if (!created) {
-      return
-    }
-    commitMessage.value = ''
-    await refreshStatus()
+  if (busy.value !== null) {
+    return
   }
-  const pushed = await operate('push', () => callRepository(plugin => plugin.pushRepository({ id: id.value })))
+  let committed = false
+  const pushed = await operate('push', async () => {
+    if (message !== null) {
+      await callRepository(plugin => plugin.commitRepository({ id: id.value, message }))
+      committed = true
+      commitMessage.value = ''
+    }
+    return callRepository(plugin => plugin.pushRepository({ id: id.value }))
+  })
+  if (!pushed && message !== null && !committed) {
+    // The commit itself failed: keep the sheet and its message for another try.
+    return
+  }
   pushSheetOpen.value = false
   if (pushed) {
     status.value = pushed
-    notice.value = message !== null ? t('push.committedAndPushed') : t('repo.pushed')
-  } else if (message !== null) {
+    notice.value = committed ? t('push.committedAndPushed') : t('repo.pushed')
+  } else if (committed) {
     const pushError = notice.value
     notice.value = `${t('push.committedNotPushed')} ${pushError ?? ''}`.trim()
   }
@@ -393,6 +417,13 @@ async function runConfirmation() {
 
 /** Back unwinds overlays, then folders; false hands Back to the app. */
 function handleBack() {
+  // A push in flight cannot be interrupted; an idle push sheet closes.
+  if (pushSheetOpen.value) {
+    if (busy.value === null) {
+      pushSheetOpen.value = false
+    }
+    return true
+  }
   if (confirmation.value) {
     confirmation.value = null
     return true
@@ -674,7 +705,14 @@ onBeforeUnmount(() => {
             </button>
           </li>
         </ul>
-        <button v-if="!historyComplete" type="button" class="repository-secondary" @click="loadHistory(false)">
+        <button
+          v-if="!historyComplete"
+          type="button"
+          class="repository-secondary"
+          data-testid="repository-load-more"
+          :disabled="historyLoading"
+          @click="loadHistory(false)"
+        >
           {{ t('repo.loadMore') }}
         </button>
       </template>
@@ -755,6 +793,7 @@ onBeforeUnmount(() => {
       v-if="pushSheetOpen && status"
       :changes="resolvedChanges"
       :ahead="status.ahead"
+      :has-upstream="status.hasUpstream"
       :branch="status.branch"
       :busy="busy === 'push'"
       @push="commitAndPush"

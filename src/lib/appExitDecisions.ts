@@ -71,6 +71,7 @@ export type AppBackButtonAction =
   | 'cancel-commit'
   | 'close-document-changes'
   | 'repository-back'
+  | 'repository-list-back'
   | 'cancel-google-folder-pick'
   | 'cancel-onedrive-folder-pick'
   | 'ignore-cloud-save'
@@ -227,8 +228,10 @@ export function getAppBackButtonAction({
     return 'repository-back'
   }
 
+  // The repository list closes its delete prompt and clone form (and
+  // holds Back during a clone) before returning to the Open page.
   if (currentScreen === 'repositories') {
-    return 'show-open-locations'
+    return 'repository-list-back'
   }
 
   if (currentScreen === 'open-locations') {

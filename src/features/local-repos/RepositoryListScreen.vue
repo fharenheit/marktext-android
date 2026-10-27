@@ -109,9 +109,13 @@ async function openClone() {
   gitPassword.value = ''
   notice.value = null
   applySource(remembered)
-  if (githubRepositories.value !== null) {
+  // A loaded list is reused; a failed or signed-out one is fetched again,
+  // so a sign-in or a restored connection shows up on the next open.
+  if (githubRepositories.value !== null && githubConnected.value && !githubRepositoriesError.value) {
     return
   }
+  githubRepositories.value = null
+  githubRepositoriesError.value = false
   // The signed-in GitHub account lists its repositories to search and pick.
   try {
     const account = await getCloudAccountState('github')
@@ -220,7 +224,7 @@ async function clone() {
     await load()
     emit('openRepository', cloned)
   } catch (error) {
-    notice.value = getRepositoryUserMessage(error)
+    notice.value = getRepositoryUserMessage(error, url)
   } finally {
     cloning.value = false
     progress.value = null
@@ -240,6 +244,24 @@ async function confirmDelete() {
     notice.value = getRepositoryUserMessage(error)
   }
 }
+
+/** Back closes the delete prompt, then the clone form; a clone in flight keeps Back. False hands Back to the app. */
+function handleBack() {
+  if (deleting.value) {
+    deleting.value = null
+    return true
+  }
+  if (cloning.value) {
+    return true
+  }
+  if (cloneOpen.value) {
+    cloneOpen.value = false
+    return true
+  }
+  return false
+}
+
+defineExpose({ handleBack })
 
 onMounted(async () => {
   if (!isLocalRepositoryAccessAvailable()) {
@@ -263,7 +285,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="repository-screen" data-testid="repository-list-screen">
     <header class="repository-header">
-      <button type="button" class="repository-back" :aria-label="t('openLocations.back')" @click="emit('back')">
+      <button type="button" class="repository-back" :aria-label="t('openLocations.back')" @click="handleBack() || emit('back')">
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
           <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         </svg>

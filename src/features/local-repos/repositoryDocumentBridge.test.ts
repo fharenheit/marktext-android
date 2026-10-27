@@ -5,6 +5,7 @@ const plugin = {
   writeRepositoryDocument: vi.fn(),
   getRepositoryFileDiff: vi.fn(),
   discardRepositoryChanges: vi.fn(),
+  pullRepository: vi.fn(),
 }
 
 vi.mock('../../lib/localRepositories', () => ({
@@ -17,6 +18,7 @@ vi.mock('@capacitor/core', () => ({
 
 import {
   getRepositoryDocumentChanges,
+  pullRepositoryDocumentForMerge,
   readRepositoryMarkdownDocument,
   resolveRepositoryImageSource,
   revertRepositoryDocument,
@@ -99,5 +101,82 @@ describe('repositoryDocumentBridge', () => {
     )
     expect(resolveRepositoryImageSource('../../escape.png', SOURCE)).toBeNull()
     expect(resolveRepositoryImageSource('https://example.com/a.png', SOURCE)).toBeNull()
+  })
+
+  describe('pullRepositoryDocumentForMerge', () => {
+    function diffs(...sides: Array<{ oldText: string | null; newText: string | null }>) {
+      for (const side of sides) {
+        plugin.getRepositoryFileDiff.mockResolvedValueOnce({ ...side, binary: false, tooLarge: false })
+      }
+    }
+
+    it('sets the edits aside, pulls and returns base, ours and theirs', async () => {
+      diffs({ oldText: 'base', newText: 'mine' }, { oldText: 'theirs', newText: 'theirs' })
+      plugin.pullRepository.mockResolvedValueOnce({ result: 'fast-forward', conflicts: [], status: {} })
+
+      const sides = await pullRepositoryDocumentForMerge(SOURCE, { encoding: 'utf16le', writeBom: true })
+
+      expect(sides).toEqual({ base: 'base', ours: 'mine', theirs: 'theirs' })
+      expect(plugin.discardRepositoryChanges).toHaveBeenCalledWith({ id: 'octocat-notes', paths: ['docs/guide.md'] })
+      expect(plugin.pullRepository).toHaveBeenCalledWith({ id: 'octocat-notes' })
+      expect(plugin.readRepositoryDocument).not.toHaveBeenCalled()
+      expect(plugin.writeRepositoryDocument).not.toHaveBeenCalled()
+    })
+
+    it('writes the edits back with their encoding and BOM when the pull fails', async () => {
+      diffs({ oldText: 'base', newText: 'mine' })
+      const failure = new Error('network down')
+      plugin.pullRepository.mockRejectedValueOnce(failure)
+
+      await expect(pullRepositoryDocumentForMerge(SOURCE, { encoding: 'utf16le', writeBom: true })).rejects.toBe(failure)
+
+      expect(plugin.writeRepositoryDocument).toHaveBeenCalledWith({
+        id: 'octocat-notes',
+        path: 'docs/guide.md',
+        markdown: 'mine',
+        encoding: 'utf16le',
+        writeBom: true,
+      })
+    })
+
+    it('learns the encoding from the file when the caller does not pass it', async () => {
+      diffs({ oldText: 'base', newText: 'mine' })
+      plugin.readRepositoryDocument.mockResolvedValueOnce({
+        path: 'docs/guide.md',
+        displayName: 'guide.md',
+        repositoryName: 'octocat/notes',
+        workTreeUri: 'file:///data/files/repositories/octocat-notes',
+        markdown: 'mine',
+        encoding: 'utf8',
+        hasEncodingBom: true,
+      })
+      plugin.pullRepository.mockRejectedValueOnce(new Error('network down'))
+
+      await expect(pullRepositoryDocumentForMerge(SOURCE)).rejects.toThrow('network down')
+
+      expect(plugin.writeRepositoryDocument).toHaveBeenCalledWith(
+        expect.objectContaining({ markdown: 'mine', encoding: 'utf8', writeBom: true }),
+      )
+    })
+
+    it('keeps the pull error when the restore fails too', async () => {
+      diffs({ oldText: 'base', newText: 'mine' })
+      const failure = new Error('pull refused')
+      plugin.pullRepository.mockRejectedValueOnce(failure)
+      plugin.writeRepositoryDocument.mockRejectedValueOnce(new Error('disk full'))
+
+      await expect(pullRepositoryDocumentForMerge(SOURCE, { encoding: 'utf8', writeBom: false })).rejects.toBe(failure)
+      expect(plugin.writeRepositoryDocument).toHaveBeenCalledTimes(1)
+    })
+
+    it('neither sets aside nor restores an unedited document', async () => {
+      diffs({ oldText: 'same', newText: 'same' })
+      const failure = new Error('pull refused')
+      plugin.pullRepository.mockRejectedValueOnce(failure)
+
+      await expect(pullRepositoryDocumentForMerge(SOURCE)).rejects.toBe(failure)
+      expect(plugin.discardRepositoryChanges).not.toHaveBeenCalled()
+      expect(plugin.writeRepositoryDocument).not.toHaveBeenCalled()
+    })
   })
 })

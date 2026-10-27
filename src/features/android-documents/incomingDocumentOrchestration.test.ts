@@ -569,7 +569,7 @@ describe('incomingDocumentOrchestration', () => {
       expect(options.openEditor).not.toHaveBeenCalled()
     })
 
-    it('leaves the open document untouched when the link cannot be loaded', async () => {
+    it('imports the shared text when the link cannot be loaded', async () => {
       const loadGitHubLink = vi.fn().mockRejectedValue(
         new AndroidDocumentError('CLOUD_NOT_CONNECTED', 'No GitHub account is connected'),
       )
@@ -582,9 +582,28 @@ describe('incomingDocumentOrchestration', () => {
 
       await orchestration.handleShareDocumentEvent({ document: linkShare, error: null })
 
-      expect(options.saveDraft).not.toHaveBeenCalled()
+      expect(loadGitHubLink).toHaveBeenCalled()
       expect(options.openAndroidDocumentResult).not.toHaveBeenCalled()
-      expect(options.homeNotice.value).toBe('Sign in to the cloud account to open this document.')
+      // The current draft is preserved first, as for any text share.
+      expect(options.saveDraft).toHaveBeenCalled()
+      expect(options.openEditor).toHaveBeenCalledWith(linkShare.markdown)
+      expect(options.homeNotice.value).not.toBe('Sign in to the cloud account to open this document.')
+    })
+
+    it('recognizes a link wrapped in angle brackets or followed by punctuation', async () => {
+      const loadGitHubLink = vi.fn().mockResolvedValue(githubDocument)
+      const { orchestration } = createOrchestration({ loadGitHubLink })
+
+      await orchestration.handleShareDocumentEvent({
+        document: { ...sharedTextDocument, markdown: 'See <https://github.com/octocat/hello/blob/main/README.md>.' },
+        error: null,
+      })
+
+      expect(loadGitHubLink).toHaveBeenCalledWith({
+        owner: 'octocat',
+        repo: 'hello',
+        segments: ['main', 'README.md'],
+      })
     })
 
     it('keeps text that only mentions a link a text share', async () => {

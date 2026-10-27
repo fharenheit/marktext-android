@@ -87,7 +87,15 @@ export function findSharedGitHubLink(text: string): GitHubDocumentLink | null {
   }
   const lastLine = lines[lines.length - 1]
   const tokens = lastLine.split(/\s+/)
-  return parseGitHubDocumentLink(tokens[tokens.length - 1])
+  return parseGitHubDocumentLink(cleanSharedLinkToken(tokens[tokens.length - 1]))
+}
+
+/**
+ * Drops what prose wraps around a pasted link: surrounding <…>, and
+ * trailing sentence punctuation or closing brackets ("see <url>.", "(url)").
+ */
+function cleanSharedLinkToken(token: string) {
+  return token.replace(/^[<(["']+/, '').replace(/[.,;:!?)\]>}"']+$/, '')
 }
 
 function isValidName(value: string) {

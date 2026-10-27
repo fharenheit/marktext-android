@@ -1,5 +1,6 @@
 import { registerPlugin, type PluginListenerHandle } from '@capacitor/core'
 import { AndroidDocumentError, isAndroidDocumentAccessAvailable } from './androidDocuments'
+import { useI18n } from './i18n'
 import type { MarkdownEncoding } from '../features/settings/advancedSettings'
 
 /** A Git working copy on the device. */
@@ -176,7 +177,7 @@ export async function callRepository<T>(operation: (plugin: LocalRepositoriesPlu
         : []
       throw new RepositoryError(
         typeof code === 'string' ? code : 'UNKNOWN',
-        typeof message === 'string' ? message : 'Repository operation failed',
+        typeof message === 'string' ? message : '',
         paths,
       )
     }
@@ -188,46 +189,80 @@ export function addRepositoryProgressListener(listener: (event: RepositoryProgre
   return LocalRepositories.addListener('repositoryProgress', listener)
 }
 
-/** User-facing text for repository failures (English, like the other document messages). */
-export function getRepositoryUserMessage(error: unknown) {
+/**
+ * User-facing, localized text for repository failures. `remoteUrl` (the
+ * repository's or the clone's address) tailors sign-in failures to GitHub
+ * or any other Git host; without it the message covers both.
+ */
+export function getRepositoryUserMessage(error: unknown, remoteUrl?: string | null) {
+  const { t } = useI18n()
   const code = error instanceof AndroidDocumentError ? error.code : 'UNKNOWN'
+  const detail = error instanceof Error ? error.message.trim() : ''
   const paths = error instanceof RepositoryError && error.paths.length > 0
-    ? ` (${error.paths.slice(0, 3).join(', ')}${error.paths.length > 3 ? ', …' : ''})`
+    ? ` ${t('repoError.files', { paths: `${error.paths.slice(0, 3).join(', ')}${error.paths.length > 3 ? ', …' : ''}` })}`
     : ''
   switch (code) {
     case 'UNAVAILABLE':
-      return 'Repositories are available in the Android app build.'
+      return t('repoError.unavailable')
     case 'INVALID_REMOTE_URL':
-      return 'Enter an https:// repository address.'
+      return t('repoError.invalidRemoteUrl')
     case 'REMOTE_NOT_FOUND':
-      return 'The repository was not found, or this account cannot access it.'
-    case 'AUTH_FAILED':
-      return 'The sign-in was refused. Check the GitHub account, or the username and password or token.'
+      return t('repoError.remoteNotFound')
+    case 'AUTH_REQUIRED':
+      return t('repoError.authRequired')
+    case 'AUTH_FAILED': {
+      const github = isGitHubRemote(remoteUrl)
+      return github === null
+        ? t('repoError.authFailed')
+        : github ? t('repoError.authFailedGitHub') : t('repoError.authFailedGit')
+    }
+    case 'REMOTE_ACCESS_DENIED':
+      return t('repoError.remoteAccessDenied')
     case 'NETWORK_FAILED':
-      return 'Could not reach the remote. Check the connection and try again.'
+      return t('repoError.network')
+    case 'TRANSPORT_FAILED':
+      return detail ? t('repoError.transportFailed', { detail }) : t('repoError.transportFailedPlain')
     case 'NOTHING_TO_COMMIT':
-      return 'There are no changes to commit.'
+      return t('repoError.nothingToCommit')
     case 'NOTHING_TO_PUSH':
-      return 'Commit something before pushing.'
+      return t('repoError.nothingToPush')
     case 'PUSH_REJECTED':
-      return 'The remote has new commits. Pull them first, then push again.'
+      return t('repoError.pushRejected')
+    case 'PUSH_REJECTED_OTHER':
+      return detail ? t('repoError.pushRefused', { detail }) : t('repoError.pushRejected')
     case 'NO_UPSTREAM':
-      return 'This branch is not on the remote yet. Push it first.'
+      return t('repoError.noUpstream')
     case 'LOCAL_CHANGES_BLOCK_PULL':
+      return `${t('repoError.localChangesBlockPull')}${paths}`
     case 'LOCAL_CHANGES_BLOCK_CHECKOUT':
+      return `${t('repoError.localChangesBlockCheckout')}${paths}`
     case 'LOCAL_CHANGES_BLOCK_REVERT':
-      return `Commit or revert your edits to these files first${paths}.`
+      return `${t('repoError.localChangesBlockRevert')}${paths}`
     case 'CONFLICTS_UNRESOLVED':
-      return 'Resolve every conflict before committing.'
+      return t('repoError.conflictsUnresolved')
     case 'MERGE_IN_PROGRESS':
-      return 'Finish or abort the current merge first.'
+      return t('repoError.mergeInProgress')
     case 'BRANCH_EXISTS':
-      return 'A branch with this name already exists.'
+      return t('repoError.branchExists')
     case 'INVALID_BRANCH_NAME':
-      return 'This branch name is not valid.'
+      return t('repoError.invalidBranchName')
     case 'REPOSITORY_NOT_FOUND':
-      return 'This repository is not on the device anymore.'
+      return t('repoError.repositoryNotFound')
     default:
-      return error instanceof Error && error.message ? error.message : 'The repository operation failed.'
+      // The native detail is English; the localized lead says what failed.
+      return detail ? t('repoError.failedDetail', { detail }) : t('repoError.failed')
+  }
+}
+
+/** True for github.com remotes, false for other hosts, null when unknown. */
+function isGitHubRemote(remoteUrl: string | null | undefined) {
+  if (!remoteUrl) {
+    return null
+  }
+  try {
+    const host = new URL(remoteUrl).hostname.toLowerCase()
+    return host === 'github.com' || host === 'www.github.com'
+  } catch {
+    return null
   }
 }

@@ -123,14 +123,24 @@ export interface RepositoryDocumentMergeSides {
   theirs: string
 }
 
+/** How the document is stored on disk, so a restore writes it back the same way. */
+export interface RepositoryDocumentStorage {
+  encoding?: string
+  writeBom?: boolean
+}
+
 /**
  * Pulls the repository while keeping this document's uncommitted edits: the
  * file goes back to its last commit so the pull can update it, and the three
  * texts come back for a three-way merge. Every side is the on-disk text, so
  * image links rewritten for the editor never read as changes. If the pull
- * fails, the edits are written back before the error surfaces.
+ * fails, the edits are written back (same encoding and BOM) before the
+ * pull's error surfaces; a failed restore never hides that error.
  */
-export async function pullRepositoryDocumentForMerge(sourceUri: string): Promise<RepositoryDocumentMergeSides> {
+export async function pullRepositoryDocumentForMerge(
+  sourceUri: string,
+  storage: RepositoryDocumentStorage = {},
+): Promise<RepositoryDocumentMergeSides> {
   const location = requireLocation(sourceUri)
   const before = await callRepository(plugin =>
     plugin.getRepositoryFileDiff({ id: location.repositoryId, path: location.path }),
@@ -138,16 +148,35 @@ export async function pullRepositoryDocumentForMerge(sourceUri: string): Promise
   const ours = before.newText ?? ''
   // A file the last commit never had cannot be set aside by a checkout.
   const setAside = before.oldText !== null && before.oldText !== before.newText
+  let restore: RepositoryDocumentStorage = storage
   if (setAside) {
+    if (storage.encoding === undefined) {
+      // Learn the on-disk encoding and BOM before the file is reset.
+      const current = await callRepository(plugin =>
+        plugin.readRepositoryDocument({ id: location.repositoryId, path: location.path, autoDetectEncoding: true }),
+      )
+      restore = { encoding: current.encoding, writeBom: storage.writeBom ?? current.hasEncodingBom }
+    }
     await revertRepositoryDocument(sourceUri)
   }
   try {
     await callRepository(plugin => plugin.pullRepository({ id: location.repositoryId }))
   } catch (error) {
     if (setAside) {
-      await callRepository(plugin =>
-        plugin.writeRepositoryDocument({ id: location.repositoryId, path: location.path, markdown: ours }),
-      )
+      try {
+        await callRepository(plugin =>
+          plugin.writeRepositoryDocument({
+            id: location.repositoryId,
+            path: location.path,
+            markdown: ours,
+            ...(restore.encoding !== undefined ? { encoding: restore.encoding } : {}),
+            ...(restore.writeBom !== undefined ? { writeBom: restore.writeBom } : {}),
+          }),
+        )
+      } catch {
+        // The pull's failure is what the user must see; the editor still
+        // holds the edits and the next autosave writes them again.
+      }
     }
     throw error
   }

@@ -17,6 +17,8 @@ export interface LocalRepositoriesMockOptions {
   incoming?: MockRepositoryFiles
   /** Signs in a GitHub account (CloudDocuments mock) listing these `owner/repo` names. */
   githubRepositories?: string[]
+  /** Holds each push this long (ms), to observe the sheet while it runs. */
+  pushDelayMs?: number
 }
 
 /**
@@ -79,12 +81,15 @@ export async function installLocalRepositoriesMock(page: Page, options: LocalRep
       commits: [initial] as Commit[],
       branches: ['main'],
       remoteBranches: ['main', 'feature/outline'],
+      /** Local branches tracking a remote one; a new local branch has none until pushed. */
+      upstreams: ['main'],
       ahead: 0,
       merging: false,
       conflicts: [] as string[],
       mine: {} as Files,
       pull: mockOptions.pull ?? 'up-to-date',
       calls: [] as string[],
+      pushes: 0,
       clones: [] as Array<Record<string, unknown>>,
       /** Native per-host credential store: host -> { username, password }. */
       credentials: {} as Record<string, { username: string; password: string }>,
@@ -124,7 +129,7 @@ export async function installLocalRepositoriesMock(page: Page, options: LocalRep
         state: state.merging ? (state.conflicts.length > 0 ? 'MERGING' : 'MERGING_RESOLVED') : 'SAFE',
         ahead: state.ahead,
         behind: 0,
-        hasUpstream: true,
+        hasUpstream: state.upstreams.includes(state.branch),
         changes: changes(),
       }
     }
@@ -274,9 +279,23 @@ export async function installLocalRepositoriesMock(page: Page, options: LocalRep
             return reject('NOTHING_TO_COMMIT', 'There are no changes to commit')
           }
           return Promise.resolve(describe(commit(String(args.message))))
-        case 'pushRepository':
-          state.ahead = 0
-          return Promise.resolve(status())
+        case 'pushRepository': {
+          state.pushes += 1
+          const publish = () => {
+            state.ahead = 0
+            if (!state.upstreams.includes(state.branch)) {
+              state.upstreams.push(state.branch)
+            }
+            if (!state.remoteBranches.includes(state.branch)) {
+              state.remoteBranches.push(state.branch)
+            }
+            return status()
+          }
+          const delay = mockOptions.pushDelayMs ?? 0
+          return delay > 0
+            ? new Promise(resolve => setTimeout(() => resolve(publish()), delay))
+            : Promise.resolve(publish())
+        }
         case 'pullRepository': {
           if (state.pull === 'fast-forward') {
             const incoming = Object.entries(mockOptions.incoming ?? {})
@@ -351,6 +370,10 @@ export async function installLocalRepositoriesMock(page: Page, options: LocalRep
           }
           if (!state.branches.includes(name)) {
             state.branches.push(name)
+            // A remote-only branch checks out tracking its remote one.
+            if (!args.create && state.remoteBranches.includes(name)) {
+              state.upstreams.push(name)
+            }
           }
           state.branch = name
           return Promise.resolve(status())

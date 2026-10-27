@@ -348,10 +348,21 @@ export function createIncomingDocumentOrchestration(
       : null
     if (githubLink && options.loadGitHubLink) {
       const loadGitHubLink = options.loadGitHubLink
+      const sharedText = action.document
       await scheduleIncomingTransaction(async () => {
-        // Load before preserving: a link that cannot be opened (signed
-        // out, no access) must leave the current document untouched.
-        const document = await loadGitHubLink(githubLink)
+        // Load before preserving; a link that cannot be opened (signed
+        // out, no access) is still shared text and imports as such.
+        let document: OpenedAndroidDocument
+        try {
+          document = await loadGitHubLink(githubLink)
+        } catch (error) {
+          options.documentLogger.warn('shared GitHub link could not be opened; importing the text', error)
+          await runIncomingTransaction(sharedText.displayName, async () => {
+            closeEditorChromeForIncomingOpen()
+            await openSharedTextDocument(sharedText)
+          })
+          return
+        }
         await runIncomingTransaction(document.displayName, async () => {
           closeEditorChromeForIncomingOpen()
           await options.openAndroidDocumentResult(document, { source: 'share' })

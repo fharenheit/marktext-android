@@ -231,6 +231,60 @@ test('Android Back unwinds the repository views before leaving', async ({ page }
   await expect(page.getByRole('heading', { name: 'Open', exact: true })).toBeVisible()
 })
 
+test('publishes a new local branch that is not on the remote yet', async ({ page }) => {
+  await openRepository(page)
+  await page.getByTestId('repository-tab-branches').click()
+  await page.getByPlaceholder('Branch name').fill('notes/today')
+  await page.getByRole('button', { name: 'Create and switch' }).click()
+  await expect(page.getByTestId('repository-branch-notes/today')).toContainText('Current branch')
+
+  // No upstream yet: nothing reads as "ahead", but the branch can be published.
+  await page.getByTestId('repository-push').click()
+  await expect(page.getByTestId('push-sheet-publish')).toContainText('notes/today is not on the remote yet')
+  const confirm = page.getByTestId('push-sheet-confirm')
+  await expect(confirm).toHaveText('Publish branch')
+  await expect(confirm).toBeEnabled()
+  await confirm.click()
+
+  await expect(page.getByTestId('push-sheet')).toBeHidden()
+  await expect(page.getByTestId('repository-notice')).toContainText('Pushed')
+  const state = await mockState(page)
+  expect(state.upstreams).toContain('notes/today')
+  expect(state.pushes).toBe(1)
+})
+
+test('Back closes an idle push sheet and waits while commit & push runs', async ({ page }) => {
+  await openRepository(page, { pushDelayMs: 1500 })
+  await editDocument(page, 'README.md', 'pushed once')
+  await page.getByTestId('back-button').click()
+  await expect(page.getByTestId('repository-screen')).toBeVisible()
+
+  const back = () => page.evaluate(() =>
+    (window as unknown as { __emitCapacitorAppBackButton: () => void }).__emitCapacitorAppBackButton())
+  const sheet = page.getByTestId('push-sheet')
+  await page.getByTestId('repository-push').click()
+  await expect(sheet).toBeVisible()
+  await back()
+  await expect(sheet).toBeHidden()
+  await expect(page.getByTestId('repository-screen')).toBeVisible()
+
+  await page.getByTestId('repository-push').click()
+  await page.getByTestId('push-sheet-confirm').dblclick()
+  // While it runs the sheet stays in its commit mode and holds Back and Escape.
+  await expect(page.getByTestId('push-sheet-confirm')).toHaveText('Pushing…')
+  await expect(page.getByTestId('push-sheet-files')).toContainText('README.md')
+  await back()
+  await page.keyboard.press('Escape')
+  await expect(sheet).toBeVisible()
+  await expect(page.getByTestId('repository-screen')).toBeVisible()
+
+  await expect(sheet).toBeHidden()
+  await expect(page.getByTestId('repository-notice')).toContainText('Committed and pushed')
+  const state = await mockState(page)
+  expect(state.pushes).toBe(1)
+  expect((state.commits as unknown[]).length).toBe(2)
+})
+
 async function openRepositoryList(page: Page, options: Partial<LocalRepositoriesMockOptions> = {}) {
   await installAndroidAppMock(page)
   await installLocalRepositoriesMock(page, { files: FILES, ...options })
@@ -405,4 +459,25 @@ test('the editor file panel jumps to another file without leaving the editor', a
   await page.evaluate(() => (window as unknown as { __emitCapacitorAppBackButton: () => void }).__emitCapacitorAppBackButton())
   await expect(panel).toBeHidden()
   await expect(page.getByTestId('editor-host')).toContainText('step one')
+})
+
+test('Android Back closes the delete prompt and the clone form before leaving the list', async ({ page }) => {
+  await openRepositoryList(page)
+  const back = () => page.evaluate(() =>
+    (window as unknown as { __emitCapacitorAppBackButton: () => void }).__emitCapacitorAppBackButton())
+
+  await page.getByRole('button', { name: 'Remove from device' }).click()
+  await expect(page.getByTestId('repository-confirm-sheet')).toBeVisible()
+  await back()
+  await expect(page.getByTestId('repository-confirm-sheet')).toBeHidden()
+  await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible()
+
+  await page.getByTestId('repository-clone-open').click()
+  await expect(page.getByTestId('repository-clone-form')).toBeVisible()
+  await back()
+  await expect(page.getByTestId('repository-clone-form')).toBeHidden()
+  await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible()
+
+  await back()
+  await expect(page.getByRole('heading', { name: 'Open', exact: true })).toBeVisible()
 })

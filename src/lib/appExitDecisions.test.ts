@@ -185,7 +185,7 @@ describe('appExitDecisions', () => {
 
   it('unwinds the repository screens and the changes view', () => {
     expect(getAppBackButtonAction({ ...baseBackState, currentScreen: 'repository' })).toBe('repository-back')
-    expect(getAppBackButtonAction({ ...baseBackState, currentScreen: 'repositories' })).toBe('show-open-locations')
+    expect(getAppBackButtonAction({ ...baseBackState, currentScreen: 'repositories' })).toBe('repository-list-back')
     expect(getAppBackButtonAction({
       ...baseBackState,
       currentScreen: 'editor',

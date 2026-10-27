@@ -52,6 +52,14 @@ describe('findSharedGitHubLink', () => {
     expect(findSharedGitHubLink(`Check this ${link}`)?.owner).toBe('o')
   })
 
+  it('strips surrounding <> and trailing punctuation from the link', () => {
+    expect(findSharedGitHubLink(`<${link}>`)?.segments).toEqual(['main', 'README.md'])
+    expect(findSharedGitHubLink(`Read this: ${link}.`)?.segments).toEqual(['main', 'README.md'])
+    expect(findSharedGitHubLink(`(see ${link})`)?.segments).toEqual(['main', 'README.md'])
+    expect(findSharedGitHubLink(`Look at <${link}>!?`)?.segments).toEqual(['main', 'README.md'])
+    expect(findSharedGitHubLink(`${link};`)?.repo).toBe('r')
+  })
+
   it('leaves longer text and non-file links as text shares', () => {
     expect(findSharedGitHubLink(`# Notes\n\nSee ${link}\nfor details`)).toBeNull()
     expect(findSharedGitHubLink(`${link} is the spec`)).toBeNull()

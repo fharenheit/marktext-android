@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core'
+import { useI18n } from './i18n'
 import {
   normalizeMarkdownEncoding,
   type AndroidMarkdownSettings,
@@ -389,6 +390,15 @@ export function getAndroidDocumentUserMessage(error: unknown) {
 
   if (code === 'CLOUD_CLIENT_ID_MISSING') {
     return 'This cloud provider is not configured in this build.'
+  }
+
+  if (code === 'CLOUD_SSO_REQUIRED') {
+    return useI18n().t('cloudError.ssoRequired')
+  }
+
+  if (code === 'CLOUD_ACCESS_DENIED') {
+    const detail = error instanceof Error ? error.message.trim() : ''
+    return detail ? useI18n().t('cloudError.accessDeniedDetail', { detail }) : useI18n().t('cloudError.accessDenied')
   }
 
   if (code === 'CLOUD_BROWSER_UNAVAILABLE') {
