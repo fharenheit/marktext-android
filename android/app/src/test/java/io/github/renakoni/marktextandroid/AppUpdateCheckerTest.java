@@ -42,14 +42,14 @@ public class AppUpdateCheckerTest {
     public void resolvesTheTagFromTheLatestReleaseRedirect() throws Exception {
         FakeTransport transport = new FakeTransport();
         transport.enqueue(302, locationHeader(
-            "https://github.com/Renakoni/marktext-android/releases/tag/v0.2.0"));
+            "https://github.com/fharenheit/marktext-android/releases/tag/v0.2.0"));
 
         AppUpdateChecker.LatestRelease latest =
             new AppUpdateChecker(transport).fetchLatestRelease();
 
         assertEquals("v0.2.0", latest.tagName);
         assertEquals(
-            "https://github.com/Renakoni/marktext-android/releases/tag/v0.2.0",
+            "https://github.com/fharenheit/marktext-android/releases/tag/v0.2.0",
             latest.releaseUrl);
         HttpTransport.Request request = transport.requests.get(0);
         assertEquals("GET", request.method);
@@ -61,14 +61,14 @@ public class AppUpdateCheckerTest {
     public void resolvesARelativeRedirectAndStripsQueryAndFragment() throws Exception {
         FakeTransport transport = new FakeTransport();
         transport.enqueue(302, locationHeader(
-            "/Renakoni/marktext-android/releases/tag/v0.2.0%2Bhotfix?utm=x#assets"));
+            "/fharenheit/marktext-android/releases/tag/v0.2.0%2Bhotfix?utm=x#assets"));
 
         AppUpdateChecker.LatestRelease latest =
             new AppUpdateChecker(transport).fetchLatestRelease();
 
         assertEquals("v0.2.0+hotfix", latest.tagName);
         assertEquals(
-            "https://github.com/Renakoni/marktext-android/releases/tag/v0.2.0%2Bhotfix",
+            "https://github.com/fharenheit/marktext-android/releases/tag/v0.2.0%2Bhotfix",
             latest.releaseUrl);
     }
 
@@ -77,13 +77,13 @@ public class AppUpdateCheckerTest {
         // No releases published: GitHub redirects to the plain listing.
         FakeTransport listing = new FakeTransport();
         listing.enqueue(302, locationHeader(
-            "https://github.com/Renakoni/marktext-android/releases"));
+            "https://github.com/fharenheit/marktext-android/releases"));
         assertThrows(IOException.class, () -> new AppUpdateChecker(listing).fetchLatestRelease());
 
         // The opened URL must never be attacker-shaped.
         FakeTransport foreign = new FakeTransport();
         foreign.enqueue(302, locationHeader(
-            "https://example.com/Renakoni/marktext-android/releases/tag/v9.9.9"));
+            "https://example.com/fharenheit/marktext-android/releases/tag/v9.9.9"));
         assertThrows(IOException.class, () -> new AppUpdateChecker(foreign).fetchLatestRelease());
     }
 
@@ -102,7 +102,7 @@ public class AppUpdateCheckerTest {
     public void keepsTheBoundedBodyReadOnTheRedirectProbe() throws Exception {
         FakeTransport transport = new FakeTransport();
         transport.enqueue(301, locationHeader(
-            "https://github.com/Renakoni/marktext-android/releases/tag/v1.0.0"));
+            "https://github.com/fharenheit/marktext-android/releases/tag/v1.0.0"));
 
         new AppUpdateChecker(transport).fetchLatestRelease();
 

@@ -85,13 +85,13 @@ async function installAndroidBackButtonMock(page: Page) {
 }
 
 test('switches between document home and the settings about screen', async ({ page }) => {
-  await page.route('https://api.github.com/repos/Renakoni/marktext-android/releases/latest', route =>
+  await page.route('https://api.github.com/repos/fharenheit/marktext-android/releases/latest', route =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
         tag_name: 'v1.0.0',
-        html_url: 'https://github.com/Renakoni/marktext-android/releases/tag/v1.0.0',
+        html_url: 'https://github.com/fharenheit/marktext-android/releases/tag/v1.0.0',
       }),
     }),
   )
@@ -280,9 +280,14 @@ test('switches between document home and the settings about screen', async ({ pa
   await expect(page.getByTestId('settings-about-app')).toBeVisible()
   // Sourced from appInfo so a version bump can never strand this test.
   await expect(page.getByTestId('settings-about-version')).toContainText(APP_INFO.version)
+  // Version · short commit hash · yyyyMMddHHmmss build time.
+  await expect(page.getByTestId('settings-about-version-value')).toHaveText(
+    new RegExp(`^${APP_INFO.version.replace(/\./g, '\\.')} · [0-9a-f]{7,} · \\d{14}$`),
+  )
+  await expect(page.getByTestId('settings-about-app')).toContainText('MarkText for Data Dynamics Inc')
   await expect(page.getByTestId('settings-about-github')).toHaveAttribute(
     'href',
-    'https://github.com/Renakoni/marktext-android',
+    'https://github.com/fharenheit/marktext-android',
   )
   await expect(page.getByTestId('settings-about-releases')).toHaveCount(0)
   await expect(page.getByTestId('settings-about-report-issue')).toHaveCount(0)
@@ -300,7 +305,7 @@ test('switches between document home and the settings about screen', async ({ pa
   await expect(page.getByTestId('settings-open-release')).toContainText('Open GitHub release')
   await expect(page.getByTestId('settings-open-release')).toHaveAttribute(
     'href',
-    'https://github.com/Renakoni/marktext-android/releases/tag/v1.0.0',
+    'https://github.com/fharenheit/marktext-android/releases/tag/v1.0.0',
   )
 
   await page.getByTestId('settings-detail-back').click()

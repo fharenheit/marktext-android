@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Search [existing issues](https://github.com/Renakoni/marktext-android/issues) first to avoid duplicates.
+        Search [existing issues](https://github.com/fharenheit/marktext-android/issues) first to avoid duplicates.
   - type: textarea
     id: problem
     attributes:

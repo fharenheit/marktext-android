@@ -33,7 +33,7 @@
   &nbsp;
   <img src="https://img.shields.io/badge/Android-7.0%2B-4c8492?style=flat-square&logo=android&logoColor=white" alt="Android 7.0+">
   &nbsp;
-  <a href="https://github.com/Renakoni/marktext-android/releases/latest"><img src="https://img.shields.io/github/v/release/Renakoni/marktext-android?style=flat-square&color=c98a4b&label=release" alt="Última versión"></a>
+  <a href="https://github.com/fharenheit/marktext-android/releases/latest"><img src="https://img.shields.io/github/v/release/fharenheit/marktext-android?style=flat-square&color=c98a4b&label=release" alt="Última versión"></a>
 </p>
 
 <p align="center">
@@ -174,7 +174,7 @@ escritorio, en una interfaz pensada para usarla con una mano.
 > instalación limpia y de actualización con la misma clave.
 
 Descarga las compilaciones firmadas desde la página de
-[versiones publicadas](https://github.com/Renakoni/marktext-android/releases/latest).
+[versiones publicadas](https://github.com/fharenheit/marktext-android/releases/latest).
 
 ## Compílalo desde el código fuente
 

@@ -91,7 +91,7 @@ async function checkUpdates() {
         </span>
         <span class="about-row-main">
           <span class="about-row-label">{{ t('about.version') }}</span>
-          <span class="about-row-value">{{ APP_INFO.version }}</span>
+          <span class="about-row-value" data-testid="settings-about-version-value">{{ APP_INFO.displayVersion }}</span>
         </span>
       </div>
 

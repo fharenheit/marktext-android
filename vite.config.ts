@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
@@ -44,7 +45,27 @@ const optimizedMuyaDependencies = [
 ]
 
 // https://vite.dev/config/
+// Build stamp shown under Settings > About: the commit the bundle was built
+// from and when (yyyyMMddHHmmss, build machine's local time).
+function readBuildHash() {
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+  } catch {
+    return 'unknown'
+  }
+}
+
+function formatBuildTime(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
+    + `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
+
 export default defineConfig({
+  define: {
+    __MARKTEXT_BUILD_HASH__: JSON.stringify(readBuildHash()),
+    __MARKTEXT_BUILD_TIME__: JSON.stringify(formatBuildTime(new Date())),
+  },
   base: './',
   plugins: [vue()],
   resolve: {

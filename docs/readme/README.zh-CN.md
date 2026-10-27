@@ -33,7 +33,7 @@
   &nbsp;
   <img src="https://img.shields.io/badge/Android-7.0%2B-4c8492?style=flat-square&logo=android&logoColor=white" alt="Android 7.0+">
   &nbsp;
-  <a href="https://github.com/Renakoni/marktext-android/releases/latest"><img src="https://img.shields.io/github/v/release/Renakoni/marktext-android?style=flat-square&color=c98a4b&label=release" alt="最新发布版本"></a>
+  <a href="https://github.com/fharenheit/marktext-android/releases/latest"><img src="https://img.shields.io/github/v/release/fharenheit/marktext-android?style=flat-square&color=c98a4b&label=release" alt="最新发布版本"></a>
 </p>
 
 <p align="center">
@@ -156,7 +156,7 @@ MarkText for Android 把 MarkText 的实时预览 Markdown 编辑带到了手机
 > 使用官方发布证书，并在发布前通过全新安装与同密钥升级检查。
 
 已签名的构建可在
-[Releases](https://github.com/Renakoni/marktext-android/releases/latest) 页面下载。
+[Releases](https://github.com/fharenheit/marktext-android/releases/latest) 页面下载。
 
 ## 从源码构建
 

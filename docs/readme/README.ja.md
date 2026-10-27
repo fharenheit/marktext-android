@@ -33,7 +33,7 @@
   &nbsp;
   <img src="https://img.shields.io/badge/Android-7.0%2B-4c8492?style=flat-square&logo=android&logoColor=white" alt="Android 7.0+">
   &nbsp;
-  <a href="https://github.com/Renakoni/marktext-android/releases/latest"><img src="https://img.shields.io/github/v/release/Renakoni/marktext-android?style=flat-square&color=c98a4b&label=release" alt="最新リリース"></a>
+  <a href="https://github.com/fharenheit/marktext-android/releases/latest"><img src="https://img.shields.io/github/v/release/fharenheit/marktext-android?style=flat-square&color=c98a4b&label=release" alt="最新リリース"></a>
 </p>
 
 <p align="center">
@@ -168,7 +168,7 @@ MarkText のオープンソースコアである Muya で、モバイル向け�
 > 公開前にクリーンインストールと同一鍵でのアップグレード検証に合格しています。
 
 署名付きビルドは
-[Releases](https://github.com/Renakoni/marktext-android/releases/latest) ページから
+[Releases](https://github.com/fharenheit/marktext-android/releases/latest) ページから
 ダウンロードできます。
 
 ## ソースからのビルド

@@ -17,7 +17,7 @@ describe('checkForAppUpdates', () => {
         new Response(
           JSON.stringify({
             tag_name: 'v1.0.0',
-            html_url: 'https://github.com/Renakoni/marktext-android/releases/tag/v1.0.0',
+            html_url: 'https://github.com/fharenheit/marktext-android/releases/tag/v1.0.0',
           }),
           { status: 200 },
         ),
@@ -27,7 +27,7 @@ describe('checkForAppUpdates', () => {
     expect(result).toMatchObject({
       status: 'available',
       latestVersion: '1.0.0',
-      releaseUrl: 'https://github.com/Renakoni/marktext-android/releases/tag/v1.0.0',
+      releaseUrl: 'https://github.com/fharenheit/marktext-android/releases/tag/v1.0.0',
     })
   })
 

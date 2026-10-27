@@ -16,7 +16,7 @@ import java.util.Map;
 final class AppUpdateChecker {
 
     static final String RELEASES_BASE =
-        "https://github.com/Renakoni/marktext-android/releases";
+        "https://github.com/fharenheit/marktext-android/releases";
     static final String LATEST_RELEASE_URL = RELEASES_BASE + "/latest";
     private static final String TAG_PREFIX = RELEASES_BASE + "/tag/";
 

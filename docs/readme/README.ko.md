@@ -33,7 +33,7 @@
   &nbsp;
   <img src="https://img.shields.io/badge/Android-7.0%2B-4c8492?style=flat-square&logo=android&logoColor=white" alt="Android 7.0+">
   &nbsp;
-  <a href="https://github.com/Renakoni/marktext-android/releases/latest"><img src="https://img.shields.io/github/v/release/Renakoni/marktext-android?style=flat-square&color=c98a4b&label=release" alt="최신 릴리스"></a>
+  <a href="https://github.com/fharenheit/marktext-android/releases/latest"><img src="https://img.shields.io/github/v/release/fharenheit/marktext-android?style=flat-square&color=c98a4b&label=release" alt="최신 릴리스"></a>
 </p>
 
 <p align="center">
@@ -166,7 +166,7 @@ MarkText for Android는 MarkText의 실시간 미리 보기 Markdown 편집을 �
 > 동일 키 업그레이드 검사를 통과합니다.
 
 서명된 빌드는
-[Releases](https://github.com/Renakoni/marktext-android/releases/latest)
+[Releases](https://github.com/fharenheit/marktext-android/releases/latest)
 페이지에서 내려받으세요.
 
 ## 소스에서 빌드하기
