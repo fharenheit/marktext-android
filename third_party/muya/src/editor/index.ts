@@ -293,10 +293,59 @@ export class Editor {
         this.focus();
     }
 
+    // An Enter the keydown path did not handle (an IME was composing, or the
+    // keyboard sent no usable keydown) and that waits for compositionend.
+    private _pendingNativeEnter: { shiftKey: boolean } | null = null;
+
+    /**
+     * Native line breaks never reach the document model: contenteditable
+     * would split the DOM under Muya's blocks (stray empty lines in table
+     * cells, dropped text). Route them through the block's Enter handling
+     * instead, after any running composition commits.
+     */
+    private _handleNativeLineBreak(event: Event) {
+        const inputType = 'inputType' in event ? event.inputType : '';
+        if (inputType !== 'insertParagraph' && inputType !== 'insertLineBreak')
+            return;
+
+        event.preventDefault();
+        const shiftKey = inputType === 'insertLineBreak';
+        const block = this.selection.getSelection()?.anchor.block as Content | undefined;
+        if (block?.composing) {
+            this._pendingNativeEnter = { shiftKey };
+            return;
+        }
+        this._runNativeEnter(shiftKey);
+    }
+
+    private _runNativeEnter(shiftKey: boolean) {
+        const block = this.selection.getSelection()?.anchor.block as Content | undefined;
+        block?.enterHandler(new KeyboardEvent('keydown', { key: 'Enter', shiftKey, cancelable: true }));
+    }
+
+    /** A tap on an empty table cell lands on the cell, not on the caret's previous spot. */
+    private _focusTappedEmptyCell(event: Event) {
+        if (!isHTMLElement(event.target))
+            return false;
+        const cell = event.target.closest('td, th');
+        const content = cell?.querySelector('.mu-table-cell-content');
+        if (!content || content.textContent !== '')
+            return false;
+        const block = getBlock(content) as Content | undefined;
+        if (!block || typeof block.setCursor !== 'function')
+            return false;
+        block.setCursor(0, 0, true);
+        this.activeContentBlock = block;
+        return true;
+    }
+
     private _dispatchEvents() {
         const { domNode } = this._muya;
 
         const eventHandler = (event: Event) => {
+            if (event.type === 'click' && this._focusTappedEmptyCell(event))
+                return;
+
             const selectionResult = this.selection.getSelection();
             const anchorBlock = selectionResult?.anchor.block;
             const isSelectionInSameBlock = selectionResult?.isSelectionInSameBlock;
@@ -339,6 +388,11 @@ export class Editor {
                 case 'compositionend':
                 case 'compositionstart': {
                     anchorBlock.composeHandler(event);
+                    if (event.type === 'compositionend' && this._pendingNativeEnter) {
+                        const { shiftKey } = this._pendingNativeEnter;
+                        this._pendingNativeEnter = null;
+                        this._runNativeEnter(shiftKey);
+                    }
                     break;
                 }
             }
@@ -352,6 +406,8 @@ export class Editor {
             fromEvent(domNode, 'compositionend'),
             fromEvent(domNode, 'compositionstart'),
         ).subscribe(eventHandler);
+
+        fromEvent(domNode, 'beforeinput').subscribe(event => this._handleNativeLineBreak(event));
     }
 
     focus() {

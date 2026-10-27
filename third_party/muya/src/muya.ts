@@ -1248,6 +1248,12 @@ export class Muya {
         if (!block)
             return;
 
+        // A GFM table cell holds inline content only: block conversions there
+        // used to build the new block beside the table and corrupt its cells.
+        const cursorContent = this.editor.activeContentBlock ?? this.editor.selection.anchorBlock;
+        if (cursorContent?.closestBlock('table'))
+            return;
+
         if (this._handleCrossBlockParagraph(type))
             return;
 

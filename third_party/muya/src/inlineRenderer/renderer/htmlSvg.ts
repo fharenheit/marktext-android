@@ -23,7 +23,7 @@ export default function htmlSvg(
     const { start, end } = token.range;
     const content = this.highlight(h, block, start, end, token);
     const html = sanitize(token.raw, PREVIEW_DOMPURIFY_CONFIG, false) as string;
-    const previewNodes = /<svg[\s>]/i.test(html) ? htmlToVNode(html) : [];
+    const previewNodes = (/<svg[\s>]/i.test(html) ? htmlToVNode(html) : undefined) ?? [];
 
     return [
         h(`span.${className}.${CLASS_NAMES.MU_INLINE_SVG}`, [

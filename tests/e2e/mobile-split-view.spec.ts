@@ -70,3 +70,14 @@ test('leaving source mode also closes the preview', async ({ page }) => {
   await expect(page.getByTestId('source-mode-editor')).toBeVisible()
   await expect(page.getByTestId('split-preview')).toHaveCount(0)
 })
+
+test('wide screens show the source and the preview side by side', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 700 })
+  await openLocalDraft(page, { id: 'split', title: 'Split title', markdown: MARKDOWN })
+  await toggleSplitView(page)
+  const sourceBox = (await page.getByTestId('source-mode-editor').boundingBox())!
+  const previewBox = (await page.getByTestId('split-preview').boundingBox())!
+  expect(previewBox.x).toBeGreaterThanOrEqual(sourceBox.x + sourceBox.width - 1)
+  expect(Math.abs(previewBox.y - sourceBox.y)).toBeLessThan(2)
+  await snapshot(page, 'split-03-wide')
+})

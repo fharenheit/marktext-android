@@ -37,6 +37,10 @@
   /* Fonts: App.vue overrides both from the code and source-editor font settings. */
   --mt-mono-font: 'D2Coding Ligature', 'DejaVu Sans Mono', 'Roboto Mono', ui-monospace, monospace;
   --mt-source-font: 'D2Coding Ligature', 'DejaVu Sans Mono', 'Roboto Mono', ui-monospace, monospace;
+  /* Monospace text is sized relative to the editor text (both from settings). */
+  --mt-text-size: 16px;
+  --mt-mono-scale: 0.9;
+  --mu-code-font-size: 90%;
 
   color: var(--text);
   background: var(--app-bg);

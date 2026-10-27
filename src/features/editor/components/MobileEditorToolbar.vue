@@ -44,6 +44,12 @@ const emit = defineEmits<{
 }>()
 
 const panels = MOBILE_TOOLBAR_PANELS
+
+// Table cells hold inline content only, so block conversions (lists,
+// headings, quotes, code and math blocks, …) are unavailable there.
+function isBlockedInTable(commandId: MobileCommandId) {
+  return props.caretInTable && commandId.startsWith('paragraph.')
+}
 const editCommands = MOBILE_TOOLBAR_EDIT_COMMANDS
 // The table quick strip keeps undo in reach — repeated structure edits
 // and one-step undos are the panel's natural rhythm.
@@ -379,7 +385,7 @@ function onToolbarPointerDownCapture() {
             type="button"
             :aria-label="getCommandTitle(command)"
             :title="getCommandTitle(command)"
-            :disabled="!editorReady"
+            :disabled="!editorReady || isBlockedInTable(command.commandId)"
             :data-command-id="command.commandId"
             :data-testid="`toolbar-command-${command.commandId}`"
             @pointerdown.prevent
@@ -496,7 +502,7 @@ function onToolbarPointerDownCapture() {
               type="button"
               :aria-label="getCommandTitle(command)"
               :title="getCommandTitle(command)"
-              :disabled="!editorReady"
+              :disabled="!editorReady || isBlockedInTable(command.commandId)"
               :data-command-id="command.commandId"
               :data-testid="`toolbar-command-${command.commandId}`"
               @pointerdown.prevent

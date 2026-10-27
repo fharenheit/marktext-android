@@ -353,7 +353,7 @@ export const zhTW = {
   'settings.code.lineNumbers': '行號',
   'settings.code.wrapLines': '自動換行',
   'settings.code.trimEmptyLines': '清除空行',
-  'settings.code.fontSize': '字型大小',
+  'settings.code.fontSize': '等寬字型大小（相對內文）',
   'settings.code.font': '等寬字型',
   'settings.code.sourceFont': '原始碼編輯器字型',
   'settings.code.tabWidth': 'Tab 寬度',
@@ -487,6 +487,8 @@ export const zhTW = {
   'settings.value.open': '開啟',
 
   'settings.unit.px': 'px',
+
+  'settings.unit.percent': '%',
   'settings.unit.seconds': ' 秒',
   'settings.placeholder.url': 'https://example.com',
   'settings.placeholder.customCss': '/* CSS */',

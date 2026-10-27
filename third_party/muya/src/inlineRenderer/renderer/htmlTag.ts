@@ -152,7 +152,16 @@ export default function htmlTag(
         }
 
         case 'br': {
-            return [h(`span.${CLASS_NAMES.MU_HTML_TAG}`, [...openContent, h(tag)])];
+            // Like other inline syntax, the raw `<br>` text only shows while
+            // the caret touches it; otherwise just the line break renders.
+            // The break stays outside the hidden span so it still applies.
+            const markerClass = this.getClassName(outerClass, block, token, cursor) === CLASS_NAMES.MU_HIDE
+                ? `.${CLASS_NAMES.MU_HIDE}`
+                : '';
+            return [h(`span.${CLASS_NAMES.MU_HTML_TAG}`, [
+                h(`span.${CLASS_NAMES.MU_HTML_TAG}${markerClass}`, openContent),
+                h(tag),
+            ])];
         }
 
         default:

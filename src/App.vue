@@ -334,12 +334,22 @@ const resolvedAppTheme = computed(() =>
 const editingSettings = computed(() => getEditingSettings(getValue))
 // Monospace text outside Muya (diffs, token fields) and the source editor
 // follow the font settings through root-level custom properties.
+// Monospace sizes are a percentage of the editor text size, so code, inline
+// code, the source editor and the preview scale together with the text.
 watch(
-  () => [editingSettings.value.codeFontFamily, editingSettings.value.sourceFontFamily] as const,
-  ([codeFont, sourceFont]) => {
+  () => [
+    editingSettings.value.codeFontFamily,
+    editingSettings.value.sourceFontFamily,
+    editingSettings.value.codeFontScale,
+    appearanceTextSettings.value.fontSize,
+  ] as const,
+  ([codeFont, sourceFont, codeScale, textSize]) => {
     const root = document.documentElement.style
     root.setProperty('--mt-mono-font', resolveCodeFontFamily(codeFont))
     root.setProperty('--mt-source-font', resolveCodeFontFamily(sourceFont))
+    root.setProperty('--mt-text-size', `${textSize}px`)
+    root.setProperty('--mt-mono-scale', String(codeScale / 100))
+    root.setProperty('--mu-code-font-size', `${codeScale}%`)
   },
   { immediate: true },
 )

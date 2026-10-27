@@ -353,7 +353,7 @@ export const es = {
   'settings.code.lineNumbers': 'Números de línea',
   'settings.code.wrapLines': 'Ajustar líneas',
   'settings.code.trimEmptyLines': 'Recortar líneas vacías',
-  'settings.code.fontSize': 'Tamaño de fuente',
+  'settings.code.fontSize': 'Tamaño monoespaciado (relativo al texto)',
   'settings.code.font': 'Fuente monoespaciada',
   'settings.code.sourceFont': 'Fuente del editor de código fuente',
   'settings.code.tabWidth': 'Ancho de tabulación',
@@ -487,6 +487,8 @@ export const es = {
   'settings.value.open': 'Abrir',
 
   'settings.unit.px': 'px',
+
+  'settings.unit.percent': ' %',
   'settings.unit.seconds': ' s',
   'settings.placeholder.url': 'https://example.com',
   'settings.placeholder.customCss': '/* CSS */',

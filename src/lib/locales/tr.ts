@@ -353,7 +353,7 @@ export const tr = {
   'settings.code.lineNumbers': 'Satır numaraları',
   'settings.code.wrapLines': 'Satırları kaydır',
   'settings.code.trimEmptyLines': 'Boş satırları kırp',
-  'settings.code.fontSize': 'Yazı tipi boyutu',
+  'settings.code.fontSize': 'Eş aralıklı boyut (metne göre)',
   'settings.code.font': 'Eş aralıklı yazı tipi',
   'settings.code.sourceFont': 'Kaynak düzenleyici yazı tipi',
   'settings.code.tabWidth': 'Sekme genişliği',
@@ -487,6 +487,8 @@ export const tr = {
   'settings.value.open': 'Aç',
 
   'settings.unit.px': 'px',
+
+  'settings.unit.percent': '%',
   'settings.unit.seconds': ' sn',
   'settings.placeholder.url': 'https://example.com',
   'settings.placeholder.customCss': '/* CSS */',

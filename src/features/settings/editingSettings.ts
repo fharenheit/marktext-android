@@ -31,7 +31,7 @@ export type EditingSettingKey =
   | 'codeBlockLineNumbers'
   | 'wrapCodeBlocks'
   | 'trimUnnecessaryCodeBlockEmptyLines'
-  | 'codeFontSize'
+  | 'codeFontScale'
   | 'codeFontFamily'
   | 'sourceFontFamily'
   | 'tabSize'
@@ -62,7 +62,8 @@ export interface EditingSettings {
   codeBlockLineNumbers: boolean
   wrapCodeBlocks: boolean
   trimUnnecessaryCodeBlockEmptyLines: boolean
-  codeFontSize: number
+  /** Monospace text size as a percentage of the surrounding text (editor font size). */
+  codeFontScale: number
   /** Every monospace span of the rendered document: code blocks, inline code, math/HTML source. */
   codeFontFamily: CodeFontFamily
   /** The source-code (raw Markdown) editor. */
@@ -113,7 +114,7 @@ export const EDITING_SETTING_KEYS = [
   'codeBlockLineNumbers',
   'wrapCodeBlocks',
   'trimUnnecessaryCodeBlockEmptyLines',
-  'codeFontSize',
+  'codeFontScale',
   'codeFontFamily',
   'sourceFontFamily',
   'tabSize',
@@ -145,7 +146,7 @@ export const DEFAULT_EDITING_SETTINGS = {
   codeBlockLineNumbers: false,
   wrapCodeBlocks: true,
   trimUnnecessaryCodeBlockEmptyLines: true,
-  codeFontSize: 14,
+  codeFontScale: 90,
   codeFontFamily: 'd2coding',
   sourceFontFamily: 'd2coding',
   tabSize: 4,
@@ -232,8 +233,8 @@ function normalizePlantumlServer(value: unknown) {
   }
 }
 
-export function normalizeCodeFontSize(value: unknown) {
-  return normalizeInteger(value, DEFAULT_EDITING_SETTINGS.codeFontSize, 12, 28)
+export function normalizeCodeFontScale(value: unknown) {
+  return normalizeInteger(value, DEFAULT_EDITING_SETTINGS.codeFontScale, 70, 130)
 }
 
 export function normalizeCodeFontFamily(value: unknown): CodeFontFamily {
@@ -290,8 +291,8 @@ export function normalizeEditingSettingValue(key: EditingSettingKey, value: Sett
       return normalizeChoice(value, SEQUENCE_THEMES, DEFAULT_EDITING_SETTINGS.sequenceTheme)
     case 'plantumlServer':
       return normalizePlantumlServer(value)
-    case 'codeFontSize':
-      return normalizeCodeFontSize(value)
+    case 'codeFontScale':
+      return normalizeCodeFontScale(value)
     case 'codeFontFamily':
     case 'sourceFontFamily':
       return normalizeCodeFontFamily(value)
@@ -409,8 +410,8 @@ export function getEditingSettings(
       ),
       DEFAULT_EDITING_SETTINGS.trimUnnecessaryCodeBlockEmptyLines,
     ),
-    codeFontSize: normalizeCodeFontSize(
-      getValue('codeFontSize', DEFAULT_EDITING_SETTINGS.codeFontSize),
+    codeFontScale: normalizeCodeFontScale(
+      getValue('codeFontScale', DEFAULT_EDITING_SETTINGS.codeFontScale),
     ),
     codeFontFamily: normalizeCodeFontFamily(
       getValue('codeFontFamily', DEFAULT_EDITING_SETTINGS.codeFontFamily),
@@ -445,7 +446,6 @@ export function getMuyaEditingOptions(settings: EditingSettings): MuyaEditingOpt
     bulletListMarker: settings.bulletListMarker,
     orderListDelimiter: settings.orderListDelimiter,
     tabSize: settings.tabSize,
-    codeFontSize: settings.codeFontSize,
     codeFontFamily: resolveCodeFontFamily(settings.codeFontFamily),
     wrapCodeBlocks: settings.wrapCodeBlocks,
     codeBlockLineNumbers: settings.codeBlockLineNumbers,
@@ -539,7 +539,6 @@ export function getMuyaEditingRuntimeUpdates(
     'trimUnnecessaryCodeBlockEmptyLines',
     next.trimUnnecessaryCodeBlockEmptyLines,
   )
-  setOption(next.codeFontSize !== previous.codeFontSize, 'codeFontSize', next.codeFontSize)
   setOption(
     next.codeFontFamily !== previous.codeFontFamily,
     'codeFontFamily',

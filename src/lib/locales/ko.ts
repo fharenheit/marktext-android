@@ -353,7 +353,7 @@ export const ko = {
   'settings.code.lineNumbers': '줄 번호',
   'settings.code.wrapLines': '줄바꿈',
   'settings.code.trimEmptyLines': '빈 줄 제거',
-  'settings.code.fontSize': '글꼴 크기',
+  'settings.code.fontSize': '고정폭 글꼴 크기 (본문 대비)',
   'settings.code.font': '고정폭(monospace) 글꼴',
   'settings.code.sourceFont': '소스 편집기 글꼴',
   'settings.code.tabWidth': '탭 너비',
@@ -487,6 +487,8 @@ export const ko = {
   'settings.value.open': '열기',
 
   'settings.unit.px': 'px',
+
+  'settings.unit.percent': '%',
   'settings.unit.seconds': '초',
   'settings.placeholder.url': 'https://example.com',
   'settings.placeholder.customCss': '/* CSS */',

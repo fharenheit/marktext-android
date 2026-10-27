@@ -353,7 +353,7 @@ export const ja = {
   'settings.code.lineNumbers': '行番号',
   'settings.code.wrapLines': '行を折り返す',
   'settings.code.trimEmptyLines': '空行を整理',
-  'settings.code.fontSize': 'フォントサイズ',
+  'settings.code.fontSize': '等幅フォントのサイズ（本文比）',
   'settings.code.font': '等幅フォント',
   'settings.code.sourceFont': 'ソースエディターのフォント',
   'settings.code.tabWidth': 'タブ幅',
@@ -487,6 +487,8 @@ export const ja = {
   'settings.value.open': '開く',
 
   'settings.unit.px': 'px',
+
+  'settings.unit.percent': '%',
   'settings.unit.seconds': ' 秒',
   'settings.placeholder.url': 'https://example.com',
   'settings.placeholder.customCss': '/* CSS */',

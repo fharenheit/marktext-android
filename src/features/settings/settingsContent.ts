@@ -559,14 +559,14 @@ const SETTINGS_DETAIL_SECTIONS_BASE: Partial<Record<SettingsPage, readonly Setti
       rows: [
         {
           kind: 'slider',
-          id: 'codeFontSize',
+          id: 'codeFontScale',
           implementation: 'runtime',
           labelKey: 'settings.code.fontSize',
-          defaultValue: 14,
-          min: 12,
-          max: 28,
-          step: 1,
-          unitKey: 'settings.unit.px',
+          defaultValue: 90,
+          min: 70,
+          max: 130,
+          step: 5,
+          unitKey: 'settings.unit.percent',
           testId: 'settings-code-font-size',
         },
         {

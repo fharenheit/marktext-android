@@ -348,7 +348,7 @@ export const en = {
   'settings.code.lineNumbers': 'Line numbers',
   'settings.code.wrapLines': 'Wrap lines',
   'settings.code.trimEmptyLines': 'Trim empty lines',
-  'settings.code.fontSize': 'Font size',
+  'settings.code.fontSize': 'Monospace size (relative to text)',
   'settings.code.font': 'Monospace font',
   'settings.code.sourceFont': 'Source editor font',
   'settings.code.tabWidth': 'Tab width',
@@ -482,6 +482,8 @@ export const en = {
   'settings.value.open': 'Open',
 
   'settings.unit.px': 'px',
+
+  'settings.unit.percent': '%',
   'settings.unit.seconds': ' s',
   'settings.placeholder.url': 'https://example.com',
   'settings.placeholder.customCss': '/* CSS */',

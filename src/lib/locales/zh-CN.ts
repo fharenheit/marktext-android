@@ -346,7 +346,7 @@ export const zhCN = {
   'settings.code.lineNumbers': '行号',
   'settings.code.wrapLines': '自动换行',
   'settings.code.trimEmptyLines': '清理空行',
-  'settings.code.fontSize': '字号',
+  'settings.code.fontSize': '等宽字体大小（相对正文）',
   'settings.code.font': '等宽字体',
   'settings.code.sourceFont': '源码编辑器字体',
   'settings.code.tabWidth': 'Tab 宽度',
@@ -480,6 +480,8 @@ export const zhCN = {
   'settings.value.open': '打开',
 
   'settings.unit.px': 'px',
+
+  'settings.unit.percent': '%',
   'settings.unit.seconds': ' 秒',
   'settings.placeholder.url': 'https://example.com',
   'settings.placeholder.customCss': '/* CSS */',

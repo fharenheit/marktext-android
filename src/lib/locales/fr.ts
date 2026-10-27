@@ -353,7 +353,7 @@ export const fr = {
   'settings.code.lineNumbers': 'Numéros de ligne',
   'settings.code.wrapLines': 'Retour à la ligne',
   'settings.code.trimEmptyLines': 'Supprimer les lignes vides',
-  'settings.code.fontSize': 'Taille de police',
+  'settings.code.fontSize': 'Taille à chasse fixe (par rapport au texte)',
   'settings.code.font': 'Police à chasse fixe',
   'settings.code.sourceFont': 'Police de l’éditeur source',
   'settings.code.tabWidth': 'Largeur de tabulation',
@@ -487,6 +487,8 @@ export const fr = {
   'settings.value.open': 'Ouvrir',
 
   'settings.unit.px': 'px',
+
+  'settings.unit.percent': ' %',
   'settings.unit.seconds': ' s',
   'settings.placeholder.url': 'https://example.com',
   'settings.placeholder.customCss': '/* CSS */',

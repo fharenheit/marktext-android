@@ -95,7 +95,7 @@
   padding: 0.15em 0.35em;
   border-radius: 4px;
   background: var(--surface-sunken);
-  font-size: 0.88em;
+  font-size: var(--mu-code-font-size);
 }
 
 .split-preview pre {
@@ -103,7 +103,7 @@
   overflow-x: auto;
   border-radius: 6px;
   background: var(--surface-sunken);
-  font-size: 0.88em;
+  font-size: var(--mu-code-font-size);
   line-height: 1.5;
 }
 

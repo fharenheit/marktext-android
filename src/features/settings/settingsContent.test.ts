@@ -106,7 +106,7 @@ const RUNTIME_SETTING_DEFAULTS = new Map<string, SettingsValue>([
     'trimUnnecessaryCodeBlockEmptyLines',
     DEFAULT_EDITING_SETTINGS.trimUnnecessaryCodeBlockEmptyLines,
   ],
-  ['codeFontSize', DEFAULT_EDITING_SETTINGS.codeFontSize],
+  ['codeFontScale', DEFAULT_EDITING_SETTINGS.codeFontScale],
   ['codeFontFamily', DEFAULT_EDITING_SETTINGS.codeFontFamily],
   ['sourceFontFamily', DEFAULT_EDITING_SETTINGS.sourceFontFamily],
   ['tabSize', String(DEFAULT_EDITING_SETTINGS.tabSize)],

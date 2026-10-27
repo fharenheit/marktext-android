@@ -211,7 +211,7 @@
     padding: 1em;
 
     color: var(--editor-color-50);
-    font-size: 90%;
+    font-size: var(--mu-code-font-size, 90%);
     font-family: var(--mu-code-font-family, 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace);
     line-height: 1.6;
 

@@ -354,7 +354,7 @@ export const de = {
   'settings.code.lineNumbers': 'Zeilennummern',
   'settings.code.wrapLines': 'Zeilen umbrechen',
   'settings.code.trimEmptyLines': 'Leere Zeilen entfernen',
-  'settings.code.fontSize': 'Schriftgröße',
+  'settings.code.fontSize': 'Größe der Festbreitenschrift (relativ zum Text)',
   'settings.code.font': 'Festbreitenschrift',
   'settings.code.sourceFont': 'Schrift im Quelltexteditor',
   'settings.code.tabWidth': 'Tab-Breite',
@@ -488,6 +488,8 @@ export const de = {
   'settings.value.open': 'Öffnen',
 
   'settings.unit.px': 'px',
+
+  'settings.unit.percent': ' %',
   'settings.unit.seconds': ' s',
   'settings.placeholder.url': 'https://example.com',
   'settings.placeholder.customCss': '/* CSS */',

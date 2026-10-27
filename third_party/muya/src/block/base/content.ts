@@ -333,6 +333,11 @@ class Content extends TreeNode {
     private _text: string;
     protected isComposed: boolean;
 
+    /** True between compositionstart and compositionend (IME input in progress). */
+    get composing() {
+        return this.isComposed;
+    }
+
     static override blockName = 'content';
 
     protected get hasSelection() {
