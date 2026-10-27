@@ -68,6 +68,37 @@ test('WYSIWYG edits flow back into the source pane and both survive leaving', as
   await expect(wysiwyg).toContainText('From the source.')
 })
 
+test('a quick switch from the source to the WYSIWYG pane keeps the source edit', async ({ page }) => {
+  await openLocalDraft(page, { id: 'split', title: 'Split title', markdown: MARKDOWN })
+  await toggleSplitView(page)
+  const source = page.getByTestId('source-mode-editor')
+  const wysiwyg = page.getByTestId('editor-host')
+
+  await source.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type('\nQuick source.\n')
+  // Well inside the source→WYSIWYG debounce.
+  await wysiwyg.locator('h1').click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' now')
+  await expect(source).toHaveValue(/# Split title now\n/)
+  await expect(source).toHaveValue(/Quick source\./)
+  await expect(wysiwyg).toContainText('Quick source.')
+})
+
+test('a WYSIWYG edit in the split keeps the source\'s own formatting', async ({ page }) => {
+  const markdown = '# Formatted\n\n* first\n* second\n\n|a|b|\n|-|-|\n|1|2|\n'
+  await openLocalDraft(page, { id: 'split', title: 'Formatted', markdown })
+  await toggleSplitView(page)
+  const source = page.getByTestId('source-mode-editor')
+  const wysiwyg = page.getByTestId('editor-host')
+
+  await wysiwyg.locator('h1').click()
+  await page.keyboard.press('End')
+  await page.keyboard.type('!')
+  await expect(source).toHaveValue(markdown.replace('# Formatted', '# Formatted!'))
+})
+
 test('leaving source mode also closes the split', async ({ page }) => {
   await openLocalDraft(page, { id: 'split', title: 'Split title', markdown: MARKDOWN })
   await toggleSplitView(page)

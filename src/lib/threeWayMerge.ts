@@ -87,10 +87,134 @@ export interface ThreeWayMergeOptions {
   strategy?: MergeConflictStrategy
   labels?: MergeLabels
   /**
-   * Comparison key per line. Lines with equal keys count as unchanged, and
-   * where both sides agree by key the THEIRS text is kept.
+   * Comparison key per line for the base→theirs diff. Lines with equal keys
+   * count as unchanged, and are written in the THEIRS text.
    */
   lineKey?: (line: string) => string
+  /**
+   * Comparison key for the base→ours diff and for telling two overlapping
+   * versions apart. Defaults to `lineKey`; pass identity where every
+   * difference on our side is a real edit that must never be folded away.
+   */
+  oursLineKey?: (line: string) => string
+}
+
+/** The line ending a text is written with: CRLF when its first line break is. */
+function lineEnding(text: string): string | null {
+  const index = text.indexOf('\n')
+  if (index < 0) {
+    return null
+  }
+  return index > 0 && text[index - 1] === '\r' ? '\r\n' : '\n'
+}
+
+/**
+ * A merge against a fixed base and theirs: the base→theirs diff is computed
+ * once, so merging successive versions of ours only diffs base→ours.
+ */
+export function createThreeWayMerger(
+  base: string,
+  theirs: string,
+  options: ThreeWayMergeOptions = {},
+): (ours: string) => ThreeWayMergeResult {
+  const strategy = options.strategy ?? 'markers'
+  const labels = options.labels ?? { ours: 'mine', theirs: 'latest' }
+  const lineKey = options.lineKey ?? ((line: string) => line)
+  const oursLineKey = options.oursLineKey ?? lineKey
+  const fixedEol = lineEnding(theirs) ?? lineEnding(base)
+  const rawBaseLines = splitLines(base)
+  // Lines theirs left unchanged (by key) are written in theirs' own text, so
+  // with a formatting-blind key the untouched parts keep theirs' formatting.
+  const theirsText: string[] = []
+  const theirsChanges = changesFrom(rawBaseLines, splitLines(theirs), lineKey, theirsText)
+  const baseLines = rawBaseLines.map((line, index) => theirsText[index] ?? line)
+
+  return ours => {
+    if (ours === theirs) {
+      return { text: ours, conflicts: 0 }
+    }
+    if (ours === base) {
+      return { text: theirs, conflicts: 0 }
+    }
+    if (theirs === base) {
+      return { text: ours, conflicts: 0 }
+    }
+
+    const oursChanges = changesFrom(rawBaseLines, splitLines(ours), oursLineKey)
+    const output: string[] = []
+    let conflicts = 0
+    let baseIndex = 0
+    let o = 0
+    let t = 0
+
+    while (o < oursChanges.length || t < theirsChanges.length) {
+      // Start a region at whichever change comes first, then absorb every
+      // change from either side that overlaps or touches it.
+      const first = t >= theirsChanges.length
+        || (o < oursChanges.length && oursChanges[o].start <= theirsChanges[t].start)
+        ? oursChanges[o]
+        : theirsChanges[t]
+      let start = first.start
+      let end = first.end
+      const regionOurs: Change[] = []
+      const regionTheirs: Change[] = []
+      let grew = true
+      while (grew) {
+        grew = false
+        while (o < oursChanges.length && oursChanges[o].start <= end && oursChanges[o].end >= start) {
+          regionOurs.push(oursChanges[o])
+          start = Math.min(start, oursChanges[o].start)
+          end = Math.max(end, oursChanges[o].end)
+          o += 1
+          grew = true
+        }
+        while (t < theirsChanges.length && theirsChanges[t].start <= end && theirsChanges[t].end >= start) {
+          regionTheirs.push(theirsChanges[t])
+          start = Math.min(start, theirsChanges[t].start)
+          end = Math.max(end, theirsChanges[t].end)
+          t += 1
+          grew = true
+        }
+      }
+
+      output.push(...baseLines.slice(baseIndex, start))
+      const oursVersion = applyWithin(baseLines, start, end, regionOurs)
+      const theirsVersion = applyWithin(baseLines, start, end, regionTheirs)
+      if (regionTheirs.length === 0) {
+        output.push(...oursVersion)
+      } else if (regionOurs.length === 0 || sameLines(oursVersion, theirsVersion, oursLineKey)) {
+        output.push(...theirsVersion)
+      } else {
+        conflicts += 1
+        if (strategy === 'ours') {
+          output.push(...oursVersion)
+        } else if (strategy === 'theirs') {
+          output.push(...theirsVersion)
+        } else {
+          output.push(
+            `<<<<<<< ${labels.ours}`,
+            ...oursVersion,
+            '=======',
+            ...theirsVersion,
+            `>>>>>>> ${labels.theirs}`,
+          )
+        }
+      }
+      baseIndex = end
+    }
+    output.push(...baseLines.slice(baseIndex))
+
+    // The final newline is a change like any other: our side wins where it
+    // added or dropped it relative to base, theirs otherwise. An emptied
+    // side has no final line to speak for.
+    const oursEndsWithNewline = ours.endsWith('\n')
+    const endsWithNewline = (ours !== '' && oursEndsWithNewline !== base.endsWith('\n')) || theirs === ''
+      ? oursEndsWithNewline
+      : theirs.endsWith('\n')
+    const eol = fixedEol ?? lineEnding(ours) ?? '\n'
+    const text = output.join(eol) + (endsWithNewline && output.length > 0 ? eol : '')
+    return { text, conflicts }
+  }
 }
 
 export function threeWayMerge(
@@ -108,81 +232,5 @@ export function threeWayMerge(
   if (theirs === base) {
     return { text: ours, conflicts: 0 }
   }
-
-  const strategy = options.strategy ?? 'markers'
-  const labels = options.labels ?? { ours: 'mine', theirs: 'latest' }
-  const lineKey = options.lineKey ?? ((line: string) => line)
-  const rawBaseLines = splitLines(base)
-  // Lines theirs left unchanged (by key) are written in theirs' own text, so
-  // with a formatting-blind key the untouched parts keep theirs' formatting.
-  const theirsText: string[] = []
-  const oursChanges = changesFrom(rawBaseLines, splitLines(ours), lineKey)
-  const theirsChanges = changesFrom(rawBaseLines, splitLines(theirs), lineKey, theirsText)
-  const baseLines = rawBaseLines.map((line, index) => theirsText[index] ?? line)
-  const output: string[] = []
-  let conflicts = 0
-  let baseIndex = 0
-  let o = 0
-  let t = 0
-
-  while (o < oursChanges.length || t < theirsChanges.length) {
-    // Start a region at whichever change comes first, then absorb every
-    // change from either side that overlaps or touches it.
-    const first = t >= theirsChanges.length
-      || (o < oursChanges.length && oursChanges[o].start <= theirsChanges[t].start)
-      ? oursChanges[o]
-      : theirsChanges[t]
-    let start = first.start
-    let end = first.end
-    const regionOurs: Change[] = []
-    const regionTheirs: Change[] = []
-    let grew = true
-    while (grew) {
-      grew = false
-      while (o < oursChanges.length && oursChanges[o].start <= end && oursChanges[o].end >= start) {
-        regionOurs.push(oursChanges[o])
-        start = Math.min(start, oursChanges[o].start)
-        end = Math.max(end, oursChanges[o].end)
-        o += 1
-        grew = true
-      }
-      while (t < theirsChanges.length && theirsChanges[t].start <= end && theirsChanges[t].end >= start) {
-        regionTheirs.push(theirsChanges[t])
-        start = Math.min(start, theirsChanges[t].start)
-        end = Math.max(end, theirsChanges[t].end)
-        t += 1
-        grew = true
-      }
-    }
-
-    output.push(...baseLines.slice(baseIndex, start))
-    const oursVersion = applyWithin(baseLines, start, end, regionOurs)
-    const theirsVersion = applyWithin(baseLines, start, end, regionTheirs)
-    if (regionTheirs.length === 0) {
-      output.push(...oursVersion)
-    } else if (regionOurs.length === 0 || sameLines(oursVersion, theirsVersion, lineKey)) {
-      output.push(...theirsVersion)
-    } else {
-      conflicts += 1
-      if (strategy === 'ours') {
-        output.push(...oursVersion)
-      } else if (strategy === 'theirs') {
-        output.push(...theirsVersion)
-      } else {
-        output.push(
-          `<<<<<<< ${labels.ours}`,
-          ...oursVersion,
-          '=======',
-          ...theirsVersion,
-          `>>>>>>> ${labels.theirs}`,
-        )
-      }
-    }
-    baseIndex = end
-  }
-  output.push(...baseLines.slice(baseIndex))
-
-  const endsWithNewline = [ours, theirs].some(text => text.endsWith('\n'))
-  const text = output.join('\n') + (endsWithNewline && output.length > 0 ? '\n' : '')
-  return { text, conflicts }
+  return createThreeWayMerger(base, theirs, options)(ours)
 }

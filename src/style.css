@@ -1138,9 +1138,19 @@ textarea {
   align-items: center;
   justify-content: center;
   order: 0;
+  position: relative;
+  z-index: 1;
   cursor: row-resize;
   touch-action: none;
   user-select: none;
+}
+
+/* A 40px touch target over the thin strip, reaching into both panes
+   without changing how the divider looks. */
+.split-divider::after {
+  position: absolute;
+  inset: -12px 0;
+  content: '';
 }
 
 .split-divider::before {
@@ -1165,6 +1175,12 @@ textarea {
   padding-top: 12px;
 }
 
+/* Unresolved conflict markers in the source: the WYSIWYG pane is read-only
+   until they are resolved. */
+.editor-pane-split > .editor-host-shell.is-locked {
+  opacity: 0.6;
+}
+
 @media (min-width: 600px) {
   .editor-pane-split {
     flex-direction: row;
@@ -1177,6 +1193,10 @@ textarea {
   .split-divider::before {
     width: 4px;
     height: 40px;
+  }
+
+  .split-divider::after {
+    inset: 0 -12px;
   }
 }
 

@@ -98,6 +98,8 @@ const props = defineProps<{
   sourceFocusOnEnter: boolean
   /** Source and WYSIWYG side by side, both editable; implies source mode. */
   splitViewActive?: boolean
+  /** The source holds merge conflict markers: the WYSIWYG pane is read-only. */
+  splitWysiwygLocked?: boolean
   /** The document lives in a repository folder the file panel can browse. */
   canBrowseFiles?: boolean
   fileSwitcher?: {
@@ -169,6 +171,8 @@ const emit = defineEmits<{
   'toggle-source-mode': [caret: { start: number, end: number } | null]
   'toggle-split-view': [caret: { start: number, end: number } | null]
   'update:source-text': [value: string, caret: { start: number, end: number } | null]
+  /** The WYSIWYG pane of the split view is about to be used. */
+  'wysiwyg-engaged': []
 }>()
 
 const editorHost = ref<HTMLElement | null>(null)
@@ -210,6 +214,41 @@ function onToggleSplitView() {
 // source textarea; everything WYSIWYG-only (toolbar, …) follows it.
 const wysiwygVisible = computed(() => !props.sourceModeActive || Boolean(props.splitViewActive))
 const splitActive = computed(() => Boolean(props.splitViewActive) && props.sourceModeActive)
+const wysiwygLocked = computed(() => splitActive.value && Boolean(props.splitWysiwygLocked))
+
+// Touching or focusing the WYSIWYG pane hands pending source edits to it
+// first, so what the user edits there is the current document.
+function onWysiwygEngaged() {
+  if (splitActive.value) {
+    emit('wysiwyg-engaged')
+  }
+}
+
+function onWysiwygPointerDown(event: PointerEvent) {
+  const target = event.target as Node | null
+  onWysiwygEngaged()
+  // The hand-over rebuilt the tree under a mouse or pen: its own caret
+  // placement would land on the detached node, so place the caret at the
+  // pointer in the fresh tree. (A touch tap hit-tests after it lifts.)
+  if (target && !target.isConnected && event.pointerType !== 'touch') {
+    event.preventDefault()
+    placeCaretAtPoint(event.clientX, event.clientY)
+  }
+}
+
+function placeCaretAtPoint(x: number, y: number) {
+  const range = document.caretRangeFromPoint?.(x, y)
+  const node = range?.startContainer
+  const element = node instanceof Element ? node : node?.parentElement
+  const root = element?.closest<HTMLElement>('[contenteditable="true"]')
+  if (!range || !root || !editorShell.value?.contains(root)) {
+    return
+  }
+  root.focus({ preventScroll: true })
+  const selection = document.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+}
 
 // Splitter: the source pane's share of the split, kept per device.
 const SPLIT_RATIO_STORAGE_KEY = 'marktext.splitView.ratio'
@@ -247,6 +286,20 @@ function setSplitRatio(value: number, persist: boolean) {
 function isSplitHorizontal() {
   return editorPane.value ? getComputedStyle(editorPane.value).flexDirection === 'row' : false
 }
+
+// The panes sit side by side from this width on (style.css), where the
+// divider itself is a vertical line.
+const SPLIT_SIDE_BY_SIDE_QUERY = '(min-width: 600px)'
+const splitSideBySideMedia = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  ? window.matchMedia(SPLIT_SIDE_BY_SIDE_QUERY)
+  : null
+const splitSideBySide = ref(splitSideBySideMedia?.matches ?? false)
+function onSplitMediaChange(event: MediaQueryListEvent) {
+  splitSideBySide.value = event.matches
+}
+splitSideBySideMedia?.addEventListener?.('change', onSplitMediaChange)
+onBeforeUnmount(() => splitSideBySideMedia?.removeEventListener?.('change', onSplitMediaChange))
+const splitValueText = computed(() => `${t('editor.sourceMode.aria')} ${Math.round(splitRatio.value * 100)}%`)
 
 function ratioFromPointer(event: PointerEvent) {
   const pane = editorPane.value
@@ -711,10 +764,14 @@ onBeforeUnmount(() => {
         v-show="wysiwygVisible"
         ref="editorShell"
         class="editor-host-shell"
+        :class="{ 'is-locked': wysiwygLocked }"
+        :inert="wysiwygLocked || undefined"
         :dir="textDirection"
         :style="editorStyleVars"
         :aria-busy="!editorReady"
         :data-testid="editorReady ? 'editor-host' : 'editor-loading-host'"
+        @pointerdown.capture="onWysiwygPointerDown"
+        @focusin="onWysiwygEngaged"
       >
         <div ref="editorHost" class="muya-host" />
       </div>
@@ -724,6 +781,7 @@ onBeforeUnmount(() => {
            by design; colors ride the theme variables. -->
       <textarea
         v-if="sourceModeActive"
+        id="source-mode-editor"
         ref="sourceTextarea"
         class="source-mode-editor"
         :value="sourceText"
@@ -744,9 +802,12 @@ onBeforeUnmount(() => {
         role="separator"
         tabindex="0"
         :aria-label="t('editor.splitView.resize')"
+        :aria-orientation="splitSideBySide ? 'vertical' : 'horizontal'"
+        aria-controls="source-mode-editor"
         aria-valuemin="15"
         aria-valuemax="85"
         :aria-valuenow="Math.round(splitRatio * 100)"
+        :aria-valuetext="splitValueText"
         data-testid="split-divider"
         @pointerdown="onSplitPointerDown"
         @pointermove="onSplitPointerMove"
@@ -806,7 +867,7 @@ onBeforeUnmount(() => {
     />
 
     <MobileEditorToolbar
-      v-if="toolbarVisible && !editorFailed && wysiwygVisible"
+      v-if="toolbarVisible && !editorFailed && wysiwygVisible && !wysiwygLocked"
       :aria-hidden="linkSheetBackgroundAriaHidden"
       :expanded="toolbarExpanded"
       :active-panel="toolbarPanel"

@@ -49,7 +49,18 @@ describe('lineDiff', () => {
       const lines = diffLines(oldLines.join('\n'), newLines.join('\n'))
       expect(apply(lines)).toEqual(newLines)
       expect(lines.filter(line => line.kind !== 'add').map(line => line.text)).toEqual(oldLines)
+      // Shortest: the kept lines are a longest common subsequence.
+      expect(lines.filter(line => line.kind === 'context')).toHaveLength(lcsLength(oldLines, newLines))
     }
+  })
+
+  it('stays minimal for scattered edits in a long document', () => {
+    const oldLines = Array.from({ length: 3000 }, (_, index) => `line ${index}`)
+    const newLines = oldLines.map((line, index) => (index % 97 === 0 ? `${line} edited` : line))
+    newLines.splice(1500, 0, 'inserted')
+    const lines = diffLines(oldLines.join('\n'), newLines.join('\n'))
+    expect(countChanges(lines)).toEqual({ added: 32, removed: 31 })
+    expect(apply(lines)).toEqual(newLines)
   })
 
   it('groups changes into hunks with context and unified-diff headers', () => {
@@ -76,6 +87,18 @@ describe('lineDiff', () => {
     expect(apply(lines)).toEqual(splitLines(newText))
   })
 })
+
+function lcsLength(a: string[], b: string[]) {
+  let previous = new Array<number>(b.length + 1).fill(0)
+  for (const line of a) {
+    const current = [0]
+    for (let index = 0; index < b.length; index += 1) {
+      current.push(line === b[index] ? previous[index] + 1 : Math.max(previous[index + 1], current[index]))
+    }
+    previous = current
+  }
+  return previous[b.length]
+}
 
 function mulberry32(seed: number) {
   let state = seed

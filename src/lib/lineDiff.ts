@@ -90,11 +90,13 @@ function diffMiddle(oldLines: string[], newLines: string[]): DiffLine[] {
 
   const max = n + m
   const offset = max
-  let v: Int32Array = new Int32Array(2 * max + 2)
+  const v = new Int32Array(2 * max + 2)
+  // Per step only the diagonals the backtrack reads ([-d, d]) are kept, so
+  // the trace grows with D² rather than D·(N+M).
   const trace: Int32Array[] = []
   let found = false
   for (let d = 0; d <= Math.min(max, MAX_EDIT_DISTANCE); d += 1) {
-    trace.push(v.slice())
+    trace.push(v.slice(offset - d, offset + d + 1))
     for (let k = -d; k <= d; k += 2) {
       let x = k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])
         ? v[offset + k + 1]
@@ -111,7 +113,6 @@ function diffMiddle(oldLines: string[], newLines: string[]): DiffLine[] {
       }
     }
     if (found) {
-      trace.push(v)
       break
     }
   }
@@ -119,15 +120,16 @@ function diffMiddle(oldLines: string[], newLines: string[]): DiffLine[] {
     return replaceAll(oldLines, newLines)
   }
 
-  // Backtrack through the saved frontiers to recover the edit script.
+  // Backtrack through the saved frontiers to recover the edit script. The
+  // frontier saved at step d holds diagonal k at index k + d.
   const reversed: DiffLine[] = []
   let x = n
   let y = m
-  for (let d = trace.length - 2; d >= 0; d -= 1) {
-    v = trace[d]
+  for (let d = trace.length - 1; d >= 0; d -= 1) {
+    const band = trace[d]
     const k = x - y
-    const previousK = k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1]) ? k + 1 : k - 1
-    const previousX = d === 0 ? 0 : v[offset + previousK]
+    const previousK = k === -d || (k !== d && band[k - 1 + d] < band[k + 1 + d]) ? k + 1 : k - 1
+    const previousX = d === 0 ? 0 : band[previousK + d]
     const previousY = previousX - previousK
     while (x > previousX && y > previousY) {
       x -= 1

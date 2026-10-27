@@ -1,4 +1,4 @@
-import { threeWayMerge } from '../../lib/threeWayMerge'
+import { createThreeWayMerger, type ThreeWayMergeResult } from '../../lib/threeWayMerge'
 
 /**
  * Keeps a document's own Markdown formatting through WYSIWYG edits.
@@ -19,19 +19,23 @@ const ORDERED_MARKER = /^(\s*)(\d+)[.)](\s+)/
 /**
  * Comparison key that ignores formatting-only differences between the
  * source and Muya's serialization: table cell padding and delimiter dash
- * runs, the bullet / ordered-list marker style, and trailing spaces. Lines
- * the user did not change therefore never count as changed.
+ * runs, the bullet / ordered-list marker style, and stray trailing spaces
+ * (a hard break's two or more stay significant). Lines the user did not
+ * change therefore never count as changed. Only the source-vs-Muya side of
+ * the merge is compared this way: the user's own edits are compared exactly.
  */
 export function markdownLineKey(line: string) {
+  const hardBreak = /\S {2,}\r?$/.test(line)
   const trimmed = line.replace(/\s+$/, '')
   if (TABLE_ROW.test(trimmed)) {
     const cells = trimmed.trim().slice(1, -1).split(/(?<!\\)\|/).map(cell => cell.trim())
     return `|${cells.map(cell => (TABLE_DELIMITER_CELL.test(cell) ? cell.replace(/-+/, '-') : cell)).join('|')}|`
   }
-  return trimmed
+  const key = trimmed
     .replace(BULLET_MARKER, '$1-$2')
     .replace(ORDERED_MARKER, '$1$2.$3')
     .replace(/^(\s*[-\d.]+)\s+/, '$1 ')
+  return hardBreak ? `${key}  ` : key
 }
 
 export interface SourceFormattingBaseline {
@@ -39,6 +43,38 @@ export interface SourceFormattingBaseline {
   source: string
   /** Muya's serialization of `source`. */
   canonical: string
+}
+
+interface BaselineMerge {
+  merge: (ours: string) => ThreeWayMergeResult
+  sourceLines: Set<string>
+  last: { canonical: string, text: string } | null
+}
+
+// Per baseline: the source-vs-Muya diff is computed once, and the latest
+// result is remembered, so repeated snapshots of one state cost nothing and
+// each new state diffs only Muya's base→now.
+const baselineMerges = new WeakMap<SourceFormattingBaseline, BaselineMerge>()
+
+function mergeFor(baseline: SourceFormattingBaseline): BaselineMerge {
+  let entry = baselineMerges.get(baseline)
+  if (!entry) {
+    entry = {
+      // Where an edited block also differs in formatting, the edit wins
+      // ('ours'): that block takes Muya's style, the rest keeps the source's.
+      // base→ours are both Muya serializations, so any difference there is a
+      // real edit and is compared exactly — never folded away by the key.
+      merge: createThreeWayMerger(baseline.canonical, baseline.source, {
+        strategy: 'ours',
+        lineKey: markdownLineKey,
+        oursLineKey: line => line,
+      }),
+      sourceLines: new Set(baseline.source.split('\n')),
+      last: null,
+    }
+    baselineMerges.set(baseline, entry)
+  }
+  return entry
 }
 
 /** The text to save for Muya's current serialization, in the source's own formatting. */
@@ -49,13 +85,11 @@ export function preserveSourceFormatting(baseline: SourceFormattingBaseline | nu
   if (canonical === baseline.canonical) {
     return baseline.source
   }
-  // Where an edited block also differs in formatting, the edit wins
-  // ('ours'): that block takes Muya's style, the rest keeps the source's.
-  const merged = threeWayMerge(baseline.canonical, canonical, baseline.source, {
-    strategy: 'ours',
-    lineKey: markdownLineKey,
-  }).text
-  return matchCompactTables(merged, new Set(baseline.source.split('\n')))
+  const entry = mergeFor(baseline)
+  if (entry.last?.canonical !== canonical) {
+    entry.last = { canonical, text: matchCompactTables(entry.merge(canonical).text, entry.sourceLines) }
+  }
+  return entry.last.text
 }
 
 const COMPACT_TABLE_ROW = /^\s*\|[^ |]/
@@ -93,7 +127,8 @@ function matchCompactTables(text: string, sourceLines: Set<string>) {
       for (let index = start; index < end; index += 1) {
         if (!COMPACT_TABLE_ROW.test(lines[index]) && !sourceLines.has(lines[index])) {
           const indent = /^\s*/.exec(lines[index])?.[0] ?? ''
-          lines[index] = indent + markdownLineKey(lines[index])
+          const cr = lines[index].endsWith('\r') ? '\r' : ''
+          lines[index] = indent + markdownLineKey(lines[index]) + cr
         }
       }
     }

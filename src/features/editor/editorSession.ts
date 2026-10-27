@@ -82,6 +82,11 @@ export interface EditorSession {
   hasEditor(): boolean
   getEditorMarkdownSnapshot(flushPending?: boolean): string
   /**
+   * Muya's own document in the source's formatting, ignoring the source-mode
+   * override: what the split view mirrors from the WYSIWYG pane.
+   */
+  getWysiwygMarkdownSnapshot(flushPending?: boolean): string
+  /**
    * Makes `source` the formatting baseline: later snapshots keep its own
    * Markdown formatting outside the blocks edited in WYSIWYG. Called when a
    * text is handed to Muya wholesale (source mode exit).
@@ -154,6 +159,10 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
       return normalizeEditorMarkdown(override)
     }
 
+    return getWysiwygMarkdownSnapshot(flushPending)
+  }
+
+  function getWysiwygMarkdownSnapshot(flushPending = false) {
     if (!editor) {
       return ''
     }
@@ -501,6 +510,7 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
     getEditor,
     hasEditor,
     getEditorMarkdownSnapshot,
+    getWysiwygMarkdownSnapshot,
     rebaseSourceFormatting,
     syncDocumentFromEditor,
     openEditor,

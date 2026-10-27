@@ -264,6 +264,7 @@ import {
   createSourceModeController,
   type SourceModeController,
 } from './features/editor/sourceMode'
+import { createSplitViewSync, hasConflictMarkers } from './features/editor/splitViewSync'
 import { AUTO_APP_LOCALE, translateKnownText, useI18n } from './lib/i18n'
 import {
   createRecentDocumentFromLocalDraft,
@@ -671,6 +672,7 @@ const {
   getEditor,
   hasEditor,
   getEditorMarkdownSnapshot,
+  getWysiwygMarkdownSnapshot,
   rebaseSourceFormatting,
   syncDocumentFromEditor,
   openEditor: openEditorSessionDocument,
@@ -689,7 +691,12 @@ const {
   androidInputDiagnosticsEnabled,
   createMuyaEditor,
   destroyMuyaEditor,
-  syncMarkdown: nextStatus => syncMarkdown(nextStatus),
+  // Muya's own change events: in the split view they mirror into the source
+  // pane first, so the edit pipeline below reads the updated textarea.
+  syncMarkdown: nextStatus => {
+    splitViewSync.editorChanged()
+    syncMarkdown(nextStatus)
+  },
   getMarkdownOverride: () => sourceModeController?.activeText() ?? null,
   onEditorSelectionChange: (...args: unknown[]) => {
     caretFollow.onEditorSelectionChange(...args)
@@ -781,55 +788,32 @@ function toggleSourceModeFromScreen(caret: { start: number, end: number } | null
 }
 
 // Split view = source mode with the WYSIWYG editor beside it, both editable.
-// The textarea stays the document of record; edits flow from whichever pane
-// has focus into the other: textarea → Muya debounced through replaceContent,
-// Muya → textarea on each WYSIWYG change. Leaving source mode by any route
-// (toggle, document switch, reset) also leaves the split.
+// The sync between the panes (by change origin, conflict-marker lock) lives
+// in splitViewSync. Leaving source mode by any route (toggle, document
+// switch, reset) also leaves the split.
 const splitViewActive = ref(false)
-const SPLIT_SOURCE_TO_EDITOR_DELAY_MS = 250
-let splitSourceTimer: ReturnType<typeof setTimeout> | null = null
-// The last text that came from the WYSIWYG pane, so mirroring it into the
-// textarea does not bounce straight back into Muya.
-let splitTextFromEditor: string | null = null
+const splitViewSync = createSplitViewSync({
+  getEditor: () => getEditor(),
+  isActive: () => splitViewActive.value && sourceModeActive.value,
+  getSourceText: () => sourceModeText.value,
+  mirrorIntoSource: text => sourceMode.mirrorText(text),
+  readEditorText: () => getWysiwygMarkdownSnapshot(),
+  rebaseFormatting: text => rebaseSourceFormatting(text),
+})
+// Unresolved merge conflict markers: the WYSIWYG pane is read-only until
+// the source resolves them.
+const splitWysiwygLocked = computed(
+  () => splitViewActive.value && sourceModeActive.value && hasConflictMarkers(sourceModeText.value),
+)
 
 function wysiwygPaneHasFocus() {
   const editor = getEditor()
   return Boolean(editor && editor.domNode.contains(document.activeElement))
 }
 
-function flushSplitSourceToEditor() {
-  if (splitSourceTimer !== null) {
-    clearTimeout(splitSourceTimer)
-    splitSourceTimer = null
-  }
-  const editor = getEditor()
-  const text = sourceModeText.value
-  if (!editor || !splitViewActive.value || text === splitTextFromEditor || wysiwygPaneHasFocus()) {
-    return
-  }
-  editor.replaceContent(text, null)
-}
-
-watch(sourceModeText, () => {
-  if (!splitViewActive.value || sourceModeText.value === splitTextFromEditor) {
-    return
-  }
-  if (splitSourceTimer !== null) {
-    clearTimeout(splitSourceTimer)
-  }
-  splitSourceTimer = setTimeout(flushSplitSourceToEditor, SPLIT_SOURCE_TO_EDITOR_DELAY_MS)
-})
-
-/** A WYSIWYG edit in the split view: mirror it into the source pane. */
-function mirrorWysiwygEditIntoSource() {
-  if (!splitViewActive.value || !sourceModeActive.value || !wysiwygPaneHasFocus()) {
-    return
-  }
-  const markdown = getEditor()?.getMarkdown()
-  if (markdown != null && markdown !== sourceModeText.value) {
-    splitTextFromEditor = markdown
-    sourceMode.mirrorText(markdown)
-  }
+function updateSourceText(value: string, caret: { start: number, end: number } | null) {
+  sourceMode.updateText(value, caret)
+  splitViewSync.sourceEdited()
 }
 
 watch(sourceModeActive, active => {
@@ -838,12 +822,10 @@ watch(sourceModeActive, active => {
   }
 })
 watch(splitViewActive, active => {
-  if (!active) {
-    if (splitSourceTimer !== null) {
-      clearTimeout(splitSourceTimer)
-      splitSourceTimer = null
-    }
-    splitTextFromEditor = null
+  if (active) {
+    splitViewSync.start()
+  } else {
+    splitViewSync.stop()
   }
 })
 
@@ -851,7 +833,7 @@ function toggleSplitViewFromScreen(caret: { start: number, end: number } | null)
   if (splitViewActive.value) {
     // Hand back whatever the textarea holds; when the WYSIWYG pane was the
     // one being edited both already agree and its caret stays put.
-    flushSplitSourceToEditor()
+    splitViewSync.flush()
     exitSourceMode(wysiwygPaneHasFocus() ? null : caret)
     return
   }
@@ -1197,7 +1179,6 @@ function syncMarkdown(nextStatus: unknown = 'Edited') {
   if (!hasEditor()) {
     return
   }
-  mirrorWysiwygEditIntoSource()
 
   const resolvedStatus = typeof nextStatus === 'string' ? nextStatus : 'Edited'
   const markDirty = resolvedStatus === 'Edited'
@@ -1455,7 +1436,10 @@ function syncAfterToolbarCommand(beforeMarkdown: string) {
     requestFrame: callback => window.requestAnimationFrame(callback),
     getMarkdown: () => getEditor()?.getMarkdown() ?? null,
     normalizeMarkdown: normalizeEditorMarkdown,
-    onEdited: () => syncMarkdown('Edited'),
+    onEdited: () => {
+      splitViewSync.editorChanged()
+      syncMarkdown('Edited')
+    },
     onUnchanged: () => syncDocumentFromEditor(documentState.value.isDirty),
   })
 }
@@ -1708,6 +1692,7 @@ watch(
 
 const activeRepository = ref<LocalRepositorySummary | null>(null)
 const repositoryScreen = ref<InstanceType<typeof RepositoryScreen> | null>(null)
+const repositoryListScreen = ref<InstanceType<typeof RepositoryListScreen> | null>(null)
 // A document opened from the repository screen returns there when closed.
 let returnToRepositoryAfterEditor = false
 
@@ -1806,7 +1791,7 @@ async function loadFileSwitcherFolder() {
         name: entry.name,
         path: githubIdPath(entry.id),
         isFolder: entry.isFolder,
-        openable: !entry.isFolder,
+        openable: !entry.isFolder && isOpenableFileName(entry.name),
       }))
     }
     if (generation === fileSwitcherGeneration && fileSwitcherState.value === state) {
@@ -1862,24 +1847,57 @@ async function openFileFromSwitcher(entry: FileSwitcherEntry) {
   if (entry.path === location.currentPath) {
     return
   }
-  try {
-    // The current document's edits are flushed (working tree, or the
-    // recovery draft of a commit-only GitHub document) before switching.
-    await saveAndroidDocument({ waitForPendingSave: true })
-    const document = location.kind === 'repository'
-      ? await readRoutedMarkdownDocument(
-          buildRepositorySourceUri(location.repositoryId, entry.path),
-          androidMarkdownSettings.value,
-        )
-      : toOpenedDocumentFromCloud(
-          'github',
-          await readCloudDocument('github', githubPathId(location.branchId, entry.path), androidMarkdownSettings.value),
-        )
-    await openAndroidDocumentResult(document)
-  } catch (error) {
-    status.value = getAndroidDocumentUserMessage(error)
-    androidDocumentLog.warn('file panel open failed', { path: entry.path, error })
+  const openEntry = async () => {
+    try {
+      const document = location.kind === 'repository'
+        ? await readRoutedMarkdownDocument(
+            buildRepositorySourceUri(location.repositoryId, entry.path),
+            androidMarkdownSettings.value,
+          )
+        : toOpenedDocumentFromCloud(
+            'github',
+            await readCloudDocument('github', githubPathId(location.branchId, entry.path), androidMarkdownSettings.value),
+          )
+      await openAndroidDocumentResult(document)
+    } catch (error) {
+      status.value = getAndroidDocumentUserMessage(error)
+      androidDocumentLog.warn('file panel open failed', { path: entry.path, error })
+    }
   }
+  // The current document's edits are flushed (working tree, or the
+  // recovery draft of a commit-only GitHub document) before switching.
+  if (await settleCurrentDocumentBeforeLeaving(openEntry)) {
+    await openEntry()
+  }
+}
+
+// A file to open once the leave-editor prompt raised for it is answered
+// (commit / save copy / discard all close the editor first).
+let openAfterEditorClose: (() => Promise<void>) | null = null
+
+/**
+ * Saves the current document before another one replaces it. True when its
+ * edits are safe: saved, or kept as the recovery draft of a commit-only
+ * document. Otherwise nothing is switched: the leave-editor prompt opens
+ * where it applies, with `next` run once it closes the editor.
+ */
+async function settleCurrentDocumentBeforeLeaving(next: () => Promise<void>) {
+  try {
+    const saved = await saveAndroidDocument({ waitForPendingSave: true })
+    if (saved || !documentState.value.isDirty) {
+      return true
+    }
+  } catch (error) {
+    androidDocumentLog.warn('save before leaving the document failed', { error })
+  }
+  if (isCommitOnlyDocument() && canPersistAndroidRecoveryDrafts()) {
+    return true
+  }
+  if (shouldPromptAndroidExitAfterSaveFailure()) {
+    openAfterEditorClose = next
+    androidExitPromptOpen.value = true
+  }
+  return false
 }
 
 // --- Show changes / revert changes for repository and cloud documents ---
@@ -2010,8 +2028,14 @@ async function pullAndMergeLatest() {
   try {
     // Settle the autosave so the working tree / recovery draft holds exactly
     // the editor text, and keep it from racing the merged result.
-    await saveAndroidDocument({ waitForPendingSave: true })
+    const saved = await saveAndroidDocument({ waitForPendingSave: true })
     clearAndroidDocumentSaveTimer()
+    // A working copy merges what is on disk: unsaved edits would be lost.
+    // (GitHub merges the editor text itself.)
+    if (!saved && documentState.value.isDirty && isRepositorySourceUri(sourceUri)) {
+      androidDocumentLog.warn('pull and merge stopped: edits not saved', { sourceUri })
+      return
+    }
     const labels = { ours: t('pullMerge.labelMine'), theirs: t('pullMerge.labelLatest') }
 
     let base: string
@@ -2019,7 +2043,9 @@ async function pullAndMergeLatest() {
     let theirs: string
     let latest: OpenedAndroidDocument | null = null
     if (isRepositorySourceUri(sourceUri)) {
-      ({ base, ours, theirs } = await pullRepositoryDocumentForMerge(sourceUri))
+      ({ base, ours, theirs } = await pullRepositoryDocumentForMerge(sourceUri, {
+        encoding: markdownSaveSettings.value.encoding,
+      }))
     } else {
       base = getCloudDocumentBaseline(sourceUri) ?? ''
       ours = syncDocumentFromEditor(documentState.value.isDirty, true).markdown
@@ -3141,6 +3167,11 @@ function closeEditorToHome() {
   homeTab.value = HOME_TABS.DOCUMENTS
   settingsPage.value = DEFAULT_SETTINGS_PAGE
   currentScreen.value = returnToRepository ? 'repository' : 'home'
+  const next = openAfterEditorClose
+  openAfterEditorClose = null
+  if (next) {
+    void next()
+  }
 }
 
 function setHomeTab(tab: HomeTab) {
@@ -3154,6 +3185,7 @@ function setSettingsPage(page: SettingsPage) {
 
 async function showHome() {
   appLog.info('show recent home')
+  openAfterEditorClose = null
   closeEditorMenu()
   closeEditorToolbar()
   closeEditorOutline()
@@ -3339,6 +3371,7 @@ async function handleAppBackButton() {
       return
     case 'close-android-exit-prompt':
       androidExitPromptOpen.value = false
+      openAfterEditorClose = null
       status.value = getAndroidEditorStatus()
       return
     case 'close-home-sheet':
@@ -3396,6 +3429,11 @@ async function handleAppBackButton() {
       return
     case 'repository-back':
       repositoryBack()
+      return
+    case 'repository-list-back':
+      if (!repositoryListScreen.value?.handleBack()) {
+        currentScreen.value = 'open-locations'
+      }
       return
     case 'cancel-cloud-name':
       resolveCloudDocumentName(null)
@@ -3765,6 +3803,7 @@ onBeforeUnmount(() => {
 
   <RepositoryListScreen
     v-else-if="currentScreen === 'repositories'"
+    ref="repositoryListScreen"
     @back="currentScreen = 'open-locations'"
     @open-repository="openRepository"
   />
@@ -3879,12 +3918,11 @@ onBeforeUnmount(() => {
     :source-entry-caret="sourceModeEntryCaret"
     :source-focus-on-enter="sourceModeFocusOnEnter"
     :split-view-active="splitViewActive"
+    :split-wysiwyg-locked="splitWysiwygLocked"
     @toggle-source-mode="toggleSourceModeFromScreen"
     @toggle-split-view="toggleSplitViewFromScreen"
-    @update:source-text="
-      (value: string, caret: { start: number, end: number } | null) =>
-        sourceMode.updateText(value, caret)
-    "
+    @update:source-text="updateSourceText"
+    @wysiwyg-engaged="splitViewSync.flush()"
     @back="showHome"
     @retry-editor="retryEditorFromRecovery"
     @search="openEditorSearch"

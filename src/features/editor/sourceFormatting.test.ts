@@ -99,6 +99,51 @@ describe('preserveSourceFormatting', () => {
     )
   })
 
+  it('keeps edits that only look like formatting inside fenced code', () => {
+    const source = '* item\n\n```diff\n- foo\n  aligned\n```\n'
+    const canonical = '- item\n\n```diff\n- foo\n  aligned\n```\n'
+    const edited = canonical.replace('- foo', '+ foo').replace('  aligned', '    aligned')
+    expect(preserveSourceFormatting({ source, canonical }, edited)).toBe(
+      '* item\n\n```diff\n+ foo\n    aligned\n```\n',
+    )
+  })
+
+  it('keeps a removed or added hard break', () => {
+    const source = '* item\n\nline one  \nline two\n'
+    const canonical = '- item\n\nline one  \nline two\n'
+    expect(preserveSourceFormatting({ source, canonical }, canonical.replace('one  ', 'one'))).toBe(
+      '* item\n\nline one\nline two\n',
+    )
+    const plain = { source: '* item\n\nline one\nline two\n', canonical: '- item\n\nline one\nline two\n' }
+    expect(preserveSourceFormatting(plain, plain.canonical.replace('one', 'one  '))).toBe(
+      '* item\n\nline one  \nline two\n',
+    )
+    expect(markdownLineKey('text  ')).not.toBe(markdownLineKey('text'))
+    expect(markdownLineKey('text ')).toBe(markdownLineKey('text'))
+  })
+
+  it('keeps a list marker change the user made', () => {
+    const source = '* a\n* b\n\npara\n'
+    const canonical = '- a\n- b\n\npara\n'
+    // Equal by key, but base and ours are both Muya's serializations: any
+    // difference between them is the user's edit and must survive.
+    expect(preserveSourceFormatting({ source, canonical }, canonical.replace('- b', '-  b'))).toBe(
+      '* a\n-  b\n\npara\n',
+    )
+  })
+
+  it('writes merged edits with the source\'s CRLF line endings', () => {
+    const source = SOURCE.replace(/\n/g, '\r\n')
+    const edited = CANONICAL.replace('Closing paragraph.', 'Closing paragraph, edited.')
+    expect(preserveSourceFormatting({ source, canonical: CANONICAL }, edited)).toBe(
+      source.replace('Closing paragraph.', 'Closing paragraph, edited.'),
+    )
+    const row = CANONICAL.replace('| beta  | 2     |', '| beta  | 20    |')
+    expect(preserveSourceFormatting({ source, canonical: CANONICAL }, row)).toBe(
+      source.replace('|beta|2|', '|beta|20|'),
+    )
+  })
+
   it('passes the serialization through without a baseline', () => {
     expect(preserveSourceFormatting(null, CANONICAL)).toBe(CANONICAL)
   })
