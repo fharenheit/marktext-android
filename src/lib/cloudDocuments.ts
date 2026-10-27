@@ -7,8 +7,10 @@ export type CloudProviderId = 'onedrive' | 'googledrive' | 'github' | 'webdav'
 
 export interface CloudAccountState {
   connected: boolean
-  /** False while the OAuth client id is not configured in this build. */
+  /** False while the OAuth client id is not configured in this build (GitHub stays available through token sign-in). */
   available: boolean
+  /** GitHub: the device flow needs the OAuth client id; token sign-in does not. */
+  deviceFlowAvailable?: boolean
   accountName: string | null
 }
 
@@ -109,6 +111,7 @@ interface CloudDocumentsPlugin {
     pickMode?: CloudPickMode
   }): Promise<CloudConnectResult>
   cancelCloudAuth(options: { provider: CloudProviderId }): Promise<void>
+  connectGitHubWithToken(options: { token: string }): Promise<{ connected: boolean; accountName: string | null }>
   setCloudImageContext(options: { provider: CloudProviderId | ''; fileId: string }): Promise<void>
   resolveGitHubLink(options: {
     owner: string
@@ -198,6 +201,11 @@ export async function resolveGitHubLink(link: { owner: string; repo: string; seg
 }
 
 /** Abandons a pending device-flow sign-in; no-op for browser sign-ins. */
+/** Signs in to GitHub with a personal access token (validated natively). */
+export async function connectGitHubWithToken(token: string) {
+  return wrapCloudErrors(() => CloudDocuments.connectGitHubWithToken({ token }))
+}
+
 export async function cancelCloudAuth(provider: CloudProviderId) {
   return wrapCloudErrors(() => CloudDocuments.cancelCloudAuth({ provider }))
 }

@@ -368,6 +368,24 @@ final class GitHubClient {
         return PollResult.authorized(new CloudTokenStore(accessToken, refreshToken, expiresAt, null));
     }
 
+    /**
+     * Loose shape check for a pasted token (classic {@code ghp_}, fine-grained
+     * {@code github_pat_} or OAuth): printable ASCII without spaces, so it
+     * can go into an Authorization header unchanged.
+     */
+    static boolean isPlausibleToken(String token) {
+        if (token == null || token.length() < 20 || token.length() > 255) {
+            return false;
+        }
+        for (int index = 0; index < token.length(); index++) {
+            char c = token.charAt(index);
+            if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && c != '_' && c != '-' && c != '.') {
+                return false;
+            }
+        }
+        return true;
+    }
+
     String getLogin(String accessToken) throws IOException, CloudProviderException {
         return apiJson(accessToken, API + "/user").optString("login", "");
     }

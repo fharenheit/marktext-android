@@ -1,0 +1,21 @@
+/*
+ * D2Coding Ligature 1.3.2 by NAVER (SIL Open Font License 1.1, see
+ * src/assets/fonts/d2coding/OFL.txt). Bundled so the default editor and code
+ * font covers Hangul and programming ligatures on every device. The files are
+ * the release TTFs re-wrapped as WOFF2 without glyph changes.
+ */
+@font-face {
+  font-family: 'D2Coding Ligature';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('D2Coding ligature'), url('../assets/fonts/d2coding/D2CodingLigature-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'D2Coding Ligature';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('D2Coding ligature Bold'), url('../assets/fonts/d2coding/D2CodingLigature-Bold.woff2') format('woff2');
+}

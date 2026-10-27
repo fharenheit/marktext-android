@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from '../../lib/i18n'
 import type { CloudAccountState, CloudFolderEntry } from '../../lib/cloudDocuments'
 
@@ -31,9 +32,19 @@ const emit = defineEmits<{
   saveHere: []
   openVerification: []
   cancelConnect: []
+  connectToken: [token: string]
+  openTokenPage: []
 }>()
 
 const { t } = useI18n()
+const githubToken = ref('')
+
+function submitGitHubToken() {
+  const token = githubToken.value.trim()
+  if (token.length > 0) {
+    emit('connectToken', token)
+  }
+}
 </script>
 
 <template>
@@ -89,13 +100,47 @@ const { t } = useI18n()
       <template v-else-if="accountState && !accountState.connected && provider === 'github'">
         <p class="cloud-browser-hint">{{ t('cloudBrowser.github.signInHint') }}</p>
         <button
+          v-if="accountState.deviceFlowAvailable"
           type="button"
           class="cloud-browser-primary"
-          :disabled="connecting !== null || !accountState.available"
+          :disabled="connecting !== null"
           @click="emit('connect')"
         >
           {{ connecting !== null ? t('cloudBrowser.loading') : t('cloudBrowser.github.connect') }}
         </button>
+        <form
+          v-if="accountState.available"
+          class="cloud-browser-token"
+          data-testid="github-token-form"
+          @submit.prevent="submitGitHubToken"
+        >
+          <p class="cloud-browser-hint">{{ t('cloudBrowser.github.tokenHint') }}</p>
+          <label class="cloud-browser-token-label" for="github-token-input">
+            {{ t('cloudBrowser.github.tokenLabel') }}
+          </label>
+          <input
+            id="github-token-input"
+            v-model="githubToken"
+            class="cloud-browser-token-input"
+            type="password"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            placeholder="github_pat_…"
+            data-testid="github-token-input"
+          >
+          <button
+            type="submit"
+            :class="accountState.deviceFlowAvailable ? 'cloud-browser-secondary' : 'cloud-browser-primary'"
+            :disabled="connecting !== null || githubToken.trim().length === 0"
+            data-testid="github-token-connect"
+          >
+            {{ connecting !== null ? t('cloudBrowser.loading') : t('cloudBrowser.github.tokenConnect') }}
+          </button>
+          <button type="button" class="cloud-browser-link" @click="emit('openTokenPage')">
+            {{ t('cloudBrowser.github.createToken') }}
+          </button>
+        </form>
         <p v-if="!accountState.available" class="cloud-browser-hint">
           {{ t('openLocations.cloudUnavailable') }}
         </p>
@@ -290,6 +335,44 @@ const { t } = useI18n()
 
 .cloud-browser-secondary:active {
   background: var(--press);
+}
+
+.cloud-browser-secondary:disabled {
+  opacity: 0.6;
+}
+
+.cloud-browser-token {
+  margin-top: 16px;
+}
+
+.cloud-browser-token-label {
+  display: block;
+  margin: 0 8px 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.cloud-browser-token-input {
+  box-sizing: border-box;
+  width: calc(100% - 16px);
+  margin: 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: 'D2Coding Ligature', 'DejaVu Sans Mono', ui-monospace, monospace;
+  font-size: 14px;
+}
+
+.cloud-browser-link {
+  display: block;
+  margin: 4px 8px;
+  padding: 8px 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 14px;
 }
 
 .cloud-browser-device-code {

@@ -14,7 +14,7 @@ export type AppearanceThemeSettingKey =
 
 export type AppearanceSettingKey = AppearanceTextSettingKey | AppearanceThemeSettingKey
 
-export type EditorFontFamily = 'open-sans' | 'system' | 'serif' | 'monospace'
+export type EditorFontFamily = 'd2coding' | 'open-sans' | 'system' | 'serif' | 'monospace'
 export type TextDirection = 'ltr' | 'rtl'
 export type AppearanceThemeMode = 'system' | 'light' | 'dark' | 'custom'
 
@@ -66,12 +66,13 @@ export const DEFAULT_APPEARANCE_TEXT_SETTINGS = {
   fontSize: 16,
   lineHeight: 1.6,
   editorLineWidth: '',
-  editorFontFamily: 'open-sans',
+  editorFontFamily: 'd2coding',
   textDirection: 'ltr',
 } as const satisfies AppearanceTextSettings
 
 const EDITOR_LINE_WIDTH_PATTERN = /^(?:$|[0-9]+(?:ch|px|%)$)/
 const EDITOR_FONT_FAMILIES = new Set<EditorFontFamily>([
+  'd2coding',
   'open-sans',
   'system',
   'serif',
@@ -82,6 +83,8 @@ const TEXT_DIRECTIONS = new Set<TextDirection>(['ltr', 'rtl'])
 const THEME_MODES = new Set<AppearanceThemeMode>(['system', 'light', 'dark', 'custom'])
 const CUSTOM_THEME_ID_SET = new Set<CustomThemeId>(APPEARANCE_CUSTOM_THEME_IDS)
 
+/** Bundled with the app (src/styles/fonts.css). */
+const D2CODING_FONT_FAMILY = '"D2Coding Ligature"'
 const OPEN_SANS_STACK =
   '"Open Sans", "Clear Sans", "Helvetica Neue", Helvetica, Arial, sans-serif, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji"'
 const SYSTEM_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'
@@ -209,6 +212,8 @@ export function resolveEditorFontFamily(fontFamily: EditorFontFamily) {
       return `${MONOSPACE_FONT_STACK}, ${OPEN_SANS_STACK}`
     case 'open-sans':
       return OPEN_SANS_STACK
+    case 'd2coding':
+      return `${D2CODING_FONT_FAMILY}, ${OPEN_SANS_STACK}`
   }
 }
 

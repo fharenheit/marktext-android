@@ -5,7 +5,7 @@ export type OrderListDelimiter = '.' | ')'
 export type ListIndentation = 'dfm' | 'tab' | 1 | 2 | 3 | 4
 export type FrontmatterType = '-' | '+' | ';' | '{'
 export type SequenceTheme = 'hand' | 'simple'
-export type CodeFontFamily = 'dejavu-sans-mono' | 'system-mono' | 'monospace'
+export type CodeFontFamily = 'd2coding' | 'dejavu-sans-mono' | 'system-mono' | 'monospace'
 export type SpellcheckerLanguage = 'en-US' | 'zh-CN' | 'de-DE' | 'fr-FR'
 
 export type EditingSettingKey =
@@ -141,7 +141,7 @@ export const DEFAULT_EDITING_SETTINGS = {
   wrapCodeBlocks: true,
   trimUnnecessaryCodeBlockEmptyLines: true,
   codeFontSize: 14,
-  codeFontFamily: 'dejavu-sans-mono',
+  codeFontFamily: 'd2coding',
   tabSize: 4,
   spellcheckerEnabled: false,
   spellcheckerLanguage: 'en-US',
@@ -153,6 +153,7 @@ const ORDER_LIST_DELIMITERS = new Set<OrderListDelimiter>(['.', ')'])
 const FRONTMATTER_TYPES = new Set<FrontmatterType>(['-', '+', ';', '{'])
 const SEQUENCE_THEMES = new Set<SequenceTheme>(['hand', 'simple'])
 const CODE_FONT_FAMILIES = new Set<CodeFontFamily>([
+  'd2coding',
   'dejavu-sans-mono',
   'system-mono',
   'monospace',
@@ -241,6 +242,8 @@ export function resolveCodeFontFamily(fontFamily: CodeFontFamily) {
       return `${MONOSPACE_STACK}, ${DEJAVU_MONO_STACK}`
     case 'dejavu-sans-mono':
       return DEJAVU_MONO_STACK
+    case 'd2coding':
+      return `"D2Coding Ligature", ${DEJAVU_MONO_STACK}`
   }
 }
 

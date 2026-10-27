@@ -102,7 +102,7 @@ describe('editingSettings', () => {
       sequenceTheme: 'hand',
       plantumlServer: DEFAULT_EDITING_SETTINGS.plantumlServer,
       codeFontSize: 14,
-      codeFontFamily: 'dejavu-sans-mono',
+      codeFontFamily: 'd2coding',
       tabSize: 4,
       spellcheckerLanguage: 'en-US',
     })

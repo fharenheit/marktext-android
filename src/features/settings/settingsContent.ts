@@ -130,6 +130,7 @@ const textDirectionOptions = [
 ] as const satisfies readonly SettingsOption[]
 
 const editorFontOptions = [
+  { id: 'd2coding', labelKey: 'settings.option.font.d2coding' },
   { id: 'system', labelKey: 'settings.option.font.system' },
   { id: 'open-sans', labelKey: 'settings.option.font.openSans' },
   { id: 'serif', labelKey: 'settings.option.font.serif' },
@@ -137,6 +138,7 @@ const editorFontOptions = [
 ] as const satisfies readonly SettingsOption[]
 
 const codeFontOptions = [
+  { id: 'd2coding', labelKey: 'settings.option.font.d2coding' },
   { id: 'dejavu-sans-mono', labelKey: 'settings.option.font.dejavuSansMono' },
   { id: 'system-mono', labelKey: 'settings.option.font.systemMono' },
   { id: 'monospace', labelKey: 'settings.option.font.monospace' },
@@ -349,7 +351,7 @@ const SETTINGS_DETAIL_SECTIONS_BASE: Partial<Record<SettingsPage, readonly Setti
           id: 'editorFontFamily',
           implementation: 'runtime',
           labelKey: 'settings.appearance.font',
-          defaultValue: 'open-sans',
+          defaultValue: 'd2coding',
           display: 'select',
           options: editorFontOptions,
           testId: 'settings-appearance-font',
@@ -572,7 +574,7 @@ const SETTINGS_DETAIL_SECTIONS_BASE: Partial<Record<SettingsPage, readonly Setti
           id: 'codeFontFamily',
           implementation: 'runtime',
           labelKey: 'settings.code.font',
-          defaultValue: 'dejavu-sans-mono',
+          defaultValue: 'd2coding',
           display: 'select',
           options: codeFontOptions,
           testId: 'settings-code-font',

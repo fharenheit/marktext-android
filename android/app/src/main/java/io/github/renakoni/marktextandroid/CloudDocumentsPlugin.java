@@ -344,9 +344,13 @@ public class CloudDocumentsPlugin extends Plugin {
         }
 
         CloudTokenStore tokens = readTokens(auth);
+        boolean hasClientId = auth.clientId().length() > 0;
         JSObject result = new JSObject();
         result.put("connected", tokens != null);
-        result.put("available", auth.clientId().length() > 0);
+        // GitHub also signs in with a pasted personal access token, which
+        // needs no OAuth app, so it stays available without a client id.
+        result.put("available", hasClientId || auth == githubAuth);
+        result.put("deviceFlowAvailable", auth == githubAuth && hasClientId);
         result.put(
             "accountName",
             tokens == null || tokens.accountName == null ? JSObject.NULL : tokens.accountName
@@ -432,6 +436,45 @@ public class CloudDocumentsPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("started", true);
         call.resolve(result);
+    }
+
+    /**
+     * Signs in to GitHub with a personal access token instead of the device
+     * flow. The token is checked against {@code GET /user} before it is
+     * stored, so a typo fails here rather than on the first listing.
+     */
+    @PluginMethod
+    public void connectGitHubWithToken(PluginCall call) {
+        String token = call.getString("token", "").trim();
+        if (!GitHubClient.isPlausibleToken(token)) {
+            call.reject("This does not look like a GitHub token", "CLOUD_TOKEN_INVALID");
+            return;
+        }
+        cancelGitHubDeviceFlow();
+        cloudExecutor.execute(() -> {
+            try {
+                String login = githubClient.getLogin(token);
+                CloudTokenStore tokens = new CloudTokenStore(
+                    token, null, CloudTokenStore.NEVER_EXPIRES, login.length() > 0 ? login : null
+                );
+                saveTokens(githubAuth, tokens);
+                Log.i(TAG, "Connected the GitHub account with a personal access token");
+                JSObject result = new JSObject();
+                result.put("connected", true);
+                result.put("accountName", tokens.accountName == null ? JSObject.NULL : tokens.accountName);
+                call.resolve(result);
+            } catch (CloudProviderException ex) {
+                Log.w(TAG, "GitHub token sign-in failed: " + ex.getMessage());
+                if ("CLOUD_AUTH_EXPIRED".equals(ex.code)) {
+                    call.reject("GitHub did not accept this token", "CLOUD_TOKEN_INVALID", ex);
+                } else {
+                    call.reject(ex.getMessage(), ex.code, ex);
+                }
+            } catch (IOException ex) {
+                Log.w(TAG, "GitHub token sign-in failed", ex);
+                call.reject("Could not reach GitHub", "CLOUD_NETWORK_FAILED", ex);
+            }
+        });
     }
 
     /**

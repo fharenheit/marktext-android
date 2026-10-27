@@ -20,6 +20,7 @@ import {
   addCloudAuthListener,
   addCloudAuthPendingListener,
   cancelCloudAuth,
+  connectGitHubWithToken,
   connectCloudAccount,
   disconnectCloudAccount,
   getCloudAccountState,
@@ -2050,6 +2051,37 @@ async function connectGitHub() {
   }
 }
 
+const githubConnectingWithToken = ref(false)
+
+async function connectGitHubToken(token: string) {
+  if (githubConnectingWithToken.value) {
+    return
+  }
+  githubConnectingWithToken.value = true
+  cloudBrowserError.value = null
+  try {
+    await connectGitHubWithToken(token)
+    githubDeviceCode.value = null
+    await refreshGitHubAccountState()
+    if (currentScreen.value === 'cloud-browser' && cloudBrowserProvider.value === 'github') {
+      await loadCloudFolder()
+    }
+  } catch (error) {
+    cloudBrowserError.value =
+      getAndroidDocumentErrorCode(error) === 'CLOUD_TOKEN_INVALID'
+        ? t('cloudBrowser.github.tokenRejected')
+        : getAndroidDocumentUserMessage(error)
+    androidDocumentLog.warn('GitHub token sign-in failed', { errorCode: getAndroidDocumentErrorCode(error) })
+  } finally {
+    githubConnectingWithToken.value = false
+  }
+}
+
+/** Fine-grained token form; the user picks repositories and permissions there. */
+function openGitHubTokenPage() {
+  void openExternalUrl('https://github.com/settings/personal-access-tokens/new')
+}
+
 /** The user types the code on github.com; copying it first saves retyping. */
 async function openGitHubVerification() {
   const code = githubDeviceCode.value
@@ -3378,7 +3410,7 @@ onBeforeUnmount(() => {
     :account-state="cloudBrowserAccountState"
     :connecting="
       cloudBrowserProvider === 'github'
-        ? githubRequestingCode
+        ? githubRequestingCode || githubConnectingWithToken
           ? 'browser'
           : null
         : cloudConnecting
@@ -3396,6 +3428,8 @@ onBeforeUnmount(() => {
     @retry="loadCloudFolder"
     @open-verification="openGitHubVerification"
     @cancel-connect="cancelGitHubSignIn"
+    @connect-token="connectGitHubToken"
+    @open-token-page="openGitHubTokenPage"
   />
 
   <EditorScreen

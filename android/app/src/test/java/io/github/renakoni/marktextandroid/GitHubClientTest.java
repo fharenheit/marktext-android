@@ -644,6 +644,16 @@ public class GitHubClientTest {
     }
 
     @Test
+    public void pastedTokensNeedAHeaderSafeShape() {
+        assertTrue(GitHubClient.isPlausibleToken("ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"));
+        assertTrue(GitHubClient.isPlausibleToken("github_pat_11ABCDEFG0123456789_abcdefghijklmnop"));
+        assertFalse(GitHubClient.isPlausibleToken(null));
+        assertFalse(GitHubClient.isPlausibleToken("short"));
+        assertFalse(GitHubClient.isPlausibleToken("ghp_has a space in it 0123456789"));
+        assertFalse(GitHubClient.isPlausibleToken("ghp_0123456789abcdef\r\nX-Injected: 1"));
+    }
+
+    @Test
     public void branchNamesFollowSafeRefRules() {
         assertTrue(GitHubClient.isValidBranchName("marktext/update-readme-20261027"));
         assertTrue(GitHubClient.isValidBranchName("fix_1.2"));
