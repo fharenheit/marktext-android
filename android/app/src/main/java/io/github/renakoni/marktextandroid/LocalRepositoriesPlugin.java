@@ -40,6 +40,8 @@ import org.json.JSONObject;
 public class LocalRepositoriesPlugin extends Plugin {
 
     private static final String TAG = "MarkTextAndroid";
+    /** Per-host username/password for non-GitHub remotes (GitCredentialStore JSON). */
+    private static final String GIT_CREDENTIAL_PREFS = "git_credentials";
     private static final String REPOSITORIES_DIRECTORY = "repositories";
     private static final String GIT_CONFIG_DIRECTORY = "git-config";
     private static final String IMPORTED_IMAGE_DIRECTORY = "images";
@@ -88,17 +90,33 @@ public class LocalRepositoriesPlugin extends Plugin {
 
     /**
      * Clones into a new working copy. `url` is any HTTPS Git URL; GitHub
-     * URLs use the signed-in GitHub account.
+     * URLs use the signed-in GitHub account. Other hosts take an optional
+     * `username`/`password` (or token): an empty password reuses the one
+     * remembered for that host and username, and credentials that cloned
+     * successfully are remembered for later clones, pushes and pulls.
      */
     @PluginMethod
     public void cloneRepository(PluginCall call) {
         String url = call.getString("url", "").trim();
         String branch = call.getString("branch", "").trim();
         String requestedName = call.getString("name", "").trim();
+        String username = call.getString("username", "").trim();
+        String password = call.getString("password", "");
+        boolean remember = Boolean.TRUE.equals(call.getBoolean("remember", true));
         if (!url.startsWith("https://") || Uri.parse(url).getHost() == null) {
             call.reject("Use an https:// repository URL", "INVALID_REMOTE_URL");
             return;
         }
+        String hostKey = GitCredentialStore.hostKey(url);
+        GitCredentialStore typed = null;
+        if (!GitCredentialStore.isGitHubHost(hostKey) && username.length() > 0) {
+            GitCredentialStore saved = readGitCredentials(hostKey);
+            if (password.length() == 0 && saved != null && username.equals(saved.username)) {
+                password = saved.password;
+            }
+            typed = new GitCredentialStore(username, password);
+        }
+        GitCredentialStore credentials = typed;
         if (branch.length() > 0 && !GitHubClient.isValidBranchName(branch)) {
             call.reject("This branch name is not valid", "INVALID_BRANCH_NAME");
             return;
@@ -112,14 +130,40 @@ public class LocalRepositoriesPlugin extends Plugin {
                 directory,
                 url,
                 branch,
-                credentialsFor(url),
+                credentials != null
+                    ? new UsernamePasswordCredentialsProvider(credentials.username, credentials.password)
+                    : credentialsFor(url),
                 (task, completed, total) -> emitProgress(id, task, completed, total)
             )) {
+                if (credentials != null && remember) {
+                    saveGitCredentials(hostKey, credentials);
+                }
                 setDisplayName(repository, name);
                 applyIdentity(repository);
                 return describe(id, repository);
             }
         });
+    }
+
+    /** What the clone form may prefill for a host: the username, never the password. */
+    @PluginMethod
+    public void getGitCredentials(PluginCall call) {
+        String hostKey = GitCredentialStore.hostKey(call.getString("url", ""));
+        GitCredentialStore saved = hostKey == null ? null : readGitCredentials(hostKey);
+        JSObject result = new JSObject();
+        result.put("host", hostKey == null ? JSObject.NULL : hostKey);
+        result.put("username", saved == null ? JSObject.NULL : saved.username);
+        result.put("hasPassword", saved != null && saved.password.length() > 0);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void forgetGitCredentials(PluginCall call) {
+        String hostKey = GitCredentialStore.hostKey(call.getString("url", ""));
+        if (hostKey != null) {
+            gitCredentialPrefs().edit().remove(hostKey).apply();
+        }
+        call.resolve(new JSObject());
     }
 
     @PluginMethod
@@ -581,14 +625,18 @@ public class LocalRepositoriesPlugin extends Plugin {
         }
     }
 
-    /** The signed-in GitHub token for github.com remotes; anonymous elsewhere. */
+    /**
+     * The signed-in GitHub token for github.com remotes; the remembered
+     * username/password for other hosts; anonymous otherwise.
+     */
     private CredentialsProvider credentialsFor(String url) {
-        if (url == null) {
+        String hostKey = GitCredentialStore.hostKey(url);
+        if (hostKey == null) {
             return null;
         }
-        String host = Uri.parse(url).getHost();
-        if (host == null || !host.equalsIgnoreCase("github.com")) {
-            return null;
+        if (!GitCredentialStore.isGitHubHost(hostKey)) {
+            GitCredentialStore saved = readGitCredentials(hostKey);
+            return saved == null ? null : new UsernamePasswordCredentialsProvider(saved.username, saved.password);
         }
         CloudTokenStore tokens = readGitHubTokens();
         if (tokens == null || !tokens.isAccessTokenFresh(System.currentTimeMillis())) {
@@ -606,6 +654,18 @@ public class LocalRepositoriesPlugin extends Plugin {
         } else {
             repository.setIdentity("MarkText for Android", "marktext@users.noreply.github.com");
         }
+    }
+
+    private android.content.SharedPreferences gitCredentialPrefs() {
+        return getContext().getSharedPreferences(GIT_CREDENTIAL_PREFS, Context.MODE_PRIVATE);
+    }
+
+    private GitCredentialStore readGitCredentials(String hostKey) {
+        return GitCredentialStore.parse(gitCredentialPrefs().getString(hostKey, ""));
+    }
+
+    private void saveGitCredentials(String hostKey, GitCredentialStore credentials) {
+        gitCredentialPrefs().edit().putString(hostKey, credentials.serialize()).apply();
     }
 
     private CloudTokenStore readGitHubTokens() {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import type { PluginListenerHandle } from '@capacitor/core'
 import { useI18n } from '../../lib/i18n'
 import {
@@ -26,14 +26,66 @@ const repositories = ref<LocalRepositorySummary[]>([])
 const loading = ref(true)
 const notice = ref<string | null>(null)
 const cloneOpen = ref(false)
+/** Where the clone comes from: the signed-in GitHub account (default) or any HTTPS Git host. */
+const cloneSource = ref<'github' | 'git'>('github')
 const cloneUrl = ref('')
 const cloneBranch = ref('')
 const cloneName = ref('')
+const gitUsername = ref('')
+const gitPassword = ref('')
+/** The native store holds a password for this host and username; an empty field reuses it. */
+const gitPasswordSaved = ref(false)
+const githubConnected = ref(false)
+const githubSearch = ref('')
+const selectedGitHubRepository = ref<CloudFolderEntry | null>(null)
 const cloning = ref(false)
 const progress = ref<RepositoryProgressEvent | null>(null)
 const githubRepositories = ref<CloudFolderEntry[] | null>(null)
+const githubRepositoriesError = ref(false)
 const deleting = ref<LocalRepositorySummary | null>(null)
 let progressListener: PluginListenerHandle | null = null
+let savedUsername: { host: string; username: string } | null = null
+
+const CLONE_FORM_STORAGE_KEY = 'marktext.repositories.cloneForm'
+
+interface RememberedCloneForm {
+  source?: 'github' | 'git'
+  gitUrl?: string
+  username?: string
+}
+
+function readRememberedCloneForm(): RememberedCloneForm {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(CLONE_FORM_STORAGE_KEY) ?? '{}')
+    return parsed && typeof parsed === 'object' ? (parsed as RememberedCloneForm) : {}
+  } catch {
+    return {}
+  }
+}
+
+function rememberCloneForm(form: RememberedCloneForm) {
+  try {
+    localStorage.setItem(CLONE_FORM_STORAGE_KEY, JSON.stringify({ ...readRememberedCloneForm(), ...form }))
+  } catch {
+    // Remembering is a convenience; private mode simply starts empty next time.
+  }
+}
+
+const filteredGitHubRepositories = computed(() => {
+  const query = githubSearch.value.trim().toLowerCase()
+  const entries = githubRepositories.value ?? []
+  return query ? entries.filter(entry => entry.name.toLowerCase().includes(query)) : entries
+})
+
+const canClone = computed(() => {
+  if (cloning.value) {
+    return false
+  }
+  if (cloneSource.value === 'github' && githubConnected.value) {
+    return selectedGitHubRepository.value !== null
+  }
+  return cloneUrl.value.trim().startsWith('https://')
+})
 
 async function load() {
   loading.value = true
@@ -47,33 +99,103 @@ async function load() {
 }
 
 async function openClone() {
+  const remembered = readRememberedCloneForm()
   cloneOpen.value = true
-  cloneUrl.value = ''
+  cloneSource.value = remembered.source === 'git' ? 'git' : 'github'
   cloneBranch.value = ''
   cloneName.value = ''
+  githubSearch.value = ''
+  selectedGitHubRepository.value = null
+  gitPassword.value = ''
   notice.value = null
+  applySource(remembered)
   if (githubRepositories.value !== null) {
     return
   }
-  // The signed-in GitHub account offers its repositories as quick picks.
+  // The signed-in GitHub account lists its repositories to search and pick.
   try {
     const account = await getCloudAccountState('github')
+    githubConnected.value = account.connected
     githubRepositories.value = account.connected ? await listCloudFolder('github') : []
   } catch {
+    githubRepositoriesError.value = githubConnected.value
     githubRepositories.value = []
   }
 }
 
+function applySource(remembered = readRememberedCloneForm()) {
+  if (cloneSource.value === 'git') {
+    cloneUrl.value = remembered.gitUrl ?? ''
+    gitUsername.value = remembered.username ?? ''
+    void refreshSavedCredentials()
+  } else {
+    cloneUrl.value = ''
+  }
+}
+
+function selectSource(source: 'github' | 'git') {
+  if (cloneSource.value === source || cloning.value) {
+    return
+  }
+  cloneSource.value = source
+  cloneName.value = ''
+  selectedGitHubRepository.value = null
+  applySource()
+}
+
+/** Prefills the username remembered for the URL's host and notes a saved password. */
+async function refreshSavedCredentials() {
+  const url = cloneUrl.value.trim()
+  if (!url.startsWith('https://')) {
+    savedUsername = null
+    gitPasswordSaved.value = false
+    return
+  }
+  try {
+    const saved = await callRepository(plugin => plugin.getGitCredentials({ url }))
+    if (url !== cloneUrl.value.trim()) {
+      return
+    }
+    savedUsername = saved.host && saved.username ? { host: saved.host, username: saved.username } : null
+    if (savedUsername && gitUsername.value.trim() === '') {
+      gitUsername.value = savedUsername.username
+    }
+    gitPasswordSaved.value = saved.hasPassword && savedUsername?.username === gitUsername.value.trim()
+  } catch {
+    gitPasswordSaved.value = false
+  }
+}
+
+watch(gitUsername, username => {
+  gitPasswordSaved.value = gitPasswordSaved.value && savedUsername?.username === username.trim()
+})
+
 function pickGitHubRepository(entry: CloudFolderEntry) {
-  cloneUrl.value = `https://github.com/${entry.id}.git`
+  selectedGitHubRepository.value = entry
   cloneName.value = entry.name
 }
 
-async function clone() {
+async function forgetSavedPassword() {
   const url = cloneUrl.value.trim()
-  if (!url || cloning.value) {
+  try {
+    await callRepository(plugin => plugin.forgetGitCredentials({ url }))
+  } catch (error) {
+    notice.value = getRepositoryUserMessage(error)
     return
   }
+  savedUsername = null
+  gitPasswordSaved.value = false
+}
+
+async function clone() {
+  if (!canClone.value) {
+    return
+  }
+  const source = cloneSource.value
+  const selected = selectedGitHubRepository.value
+  const url = source === 'github' && githubConnected.value && selected
+    ? `https://github.com/${selected.id}.git`
+    : cloneUrl.value.trim()
   cloning.value = true
   progress.value = null
   notice.value = null
@@ -83,8 +205,17 @@ async function clone() {
         url,
         branch: cloneBranch.value.trim() || undefined,
         name: cloneName.value.trim() || undefined,
+        ...(source === 'git'
+          ? { username: gitUsername.value.trim() || undefined, password: gitPassword.value || undefined, remember: true }
+          : {}),
       }),
     )
+    rememberCloneForm(
+      source === 'git'
+        ? { source, gitUrl: url, username: gitUsername.value.trim() }
+        : { source },
+    )
+    gitPassword.value = ''
     cloneOpen.value = false
     await load()
     emit('openRepository', cloned)
@@ -148,35 +279,125 @@ onBeforeUnmount(() => {
 
       <section v-if="cloneOpen" class="repository-card" data-testid="repository-clone-form">
         <h2 class="repository-section-title">{{ t('clone.title') }}</h2>
-        <template v-if="githubRepositories && githubRepositories.length > 0">
-          <p class="repository-hint">{{ t('clone.fromGitHub') }}</p>
-          <div class="repository-chips">
-            <button
-              v-for="entry in githubRepositories"
-              :key="entry.id"
-              type="button"
-              class="repository-chip"
-              :class="{ 'repository-chip-selected': cloneName === entry.name }"
+        <div class="repository-segmented" role="radiogroup" :aria-label="t('clone.source')">
+          <button
+            v-for="source in (['github', 'git'] as const)"
+            :key="source"
+            type="button"
+            role="radio"
+            class="repository-segment"
+            :class="{ 'repository-segment-selected': cloneSource === source }"
+            :aria-checked="cloneSource === source"
+            :disabled="cloning"
+            :data-testid="`repository-clone-source-${source}`"
+            @click="selectSource(source)"
+          >
+            {{ source === 'github' ? 'GitHub' : t('clone.sourceGit') }}
+          </button>
+        </div>
+
+        <template v-if="cloneSource === 'github'">
+          <p v-if="githubRepositories === null" class="repository-hint">{{ t('cloudBrowser.loading') }}</p>
+          <template v-else-if="githubConnected && !githubRepositoriesError">
+            <input
+              v-model="githubSearch"
+              class="repository-input"
+              type="search"
+              autocapitalize="off"
+              spellcheck="false"
+              :placeholder="t('clone.search')"
+              :aria-label="t('clone.search')"
               :disabled="cloning"
-              @click="pickGitHubRepository(entry)"
+              data-testid="repository-clone-search"
             >
-              {{ entry.name }}
-            </button>
-          </div>
+            <ul class="repository-pick-list" :aria-label="t('clone.fromGitHub')" data-testid="repository-clone-github-list">
+              <li v-for="entry in filteredGitHubRepositories" :key="entry.id">
+                <button
+                  type="button"
+                  class="repository-pick"
+                  :class="{ 'repository-pick-selected': selectedGitHubRepository?.id === entry.id }"
+                  :aria-pressed="selectedGitHubRepository?.id === entry.id"
+                  :disabled="cloning"
+                  :data-testid="`repository-clone-pick-${entry.id}`"
+                  @click="pickGitHubRepository(entry)"
+                >
+                  <span class="repository-pick-owner">{{ entry.name.split('/')[0] }}/</span>
+                  <span class="repository-pick-name">{{ entry.name.split('/').slice(1).join('/') }}</span>
+                </button>
+              </li>
+              <li v-if="filteredGitHubRepositories.length === 0" class="repository-hint">
+                {{ githubSearch.trim() ? t('clone.noMatches') : t('cloudBrowser.empty') }}
+              </li>
+            </ul>
+          </template>
+          <template v-else>
+            <p class="repository-hint">{{ githubRepositoriesError ? t('clone.listFailed') : t('clone.signInHint') }}</p>
+            <input
+              v-model="cloneUrl"
+              class="repository-input"
+              type="url"
+              inputmode="url"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="https://github.com/owner/repo.git"
+              :aria-label="t('clone.url')"
+              :disabled="cloning"
+              data-testid="repository-clone-url"
+            >
+          </template>
         </template>
-        <p v-else-if="githubRepositories" class="repository-hint">{{ t('clone.signInHint') }}</p>
-        <input
-          v-model="cloneUrl"
-          class="repository-input"
-          type="url"
-          inputmode="url"
-          autocapitalize="off"
-          spellcheck="false"
-          :placeholder="t('clone.url')"
-          :aria-label="t('clone.url')"
-          :disabled="cloning"
-          data-testid="repository-clone-url"
-        >
+
+        <template v-else>
+          <input
+            v-model="cloneUrl"
+            class="repository-input"
+            type="url"
+            inputmode="url"
+            autocapitalize="off"
+            spellcheck="false"
+            :placeholder="t('clone.url')"
+            :aria-label="t('clone.url')"
+            :disabled="cloning"
+            data-testid="repository-clone-url"
+            @change="refreshSavedCredentials"
+          >
+          <input
+            v-model="gitUsername"
+            class="repository-input"
+            type="text"
+            autocomplete="username"
+            autocapitalize="off"
+            spellcheck="false"
+            :placeholder="t('clone.username')"
+            :aria-label="t('clone.username')"
+            :disabled="cloning"
+            data-testid="repository-clone-username"
+          >
+          <input
+            v-model="gitPassword"
+            class="repository-input"
+            type="password"
+            autocomplete="current-password"
+            :placeholder="gitPasswordSaved ? t('clone.passwordSaved') : t('clone.password')"
+            :aria-label="t('clone.password')"
+            :disabled="cloning"
+            data-testid="repository-clone-password"
+          >
+          <p class="repository-hint">
+            {{ t('clone.credentialsHint') }}
+            <button
+              v-if="gitPasswordSaved"
+              type="button"
+              class="repository-link"
+              :disabled="cloning"
+              data-testid="repository-clone-forget"
+              @click="forgetSavedPassword"
+            >
+              {{ t('clone.forgetPassword') }}
+            </button>
+          </p>
+        </template>
+
         <input
           v-model="cloneBranch"
           class="repository-input"
@@ -194,7 +415,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="repository-primary"
-            :disabled="cloning || !cloneUrl.trim().startsWith('https://')"
+            :disabled="!canClone"
             data-testid="repository-clone-confirm"
             @click="clone"
           >

@@ -199,3 +199,71 @@ test('Android Back unwinds the repository views before leaving', async ({ page }
   await back()
   await expect(page.getByRole('heading', { name: 'Open', exact: true })).toBeVisible()
 })
+
+async function openRepositoryList(page: Page, options: Partial<LocalRepositoriesMockOptions> = {}) {
+  await installAndroidAppMock(page)
+  await installLocalRepositoriesMock(page, { files: FILES, ...options })
+  await page.goto('/')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await page.getByTestId('open-file-button').click()
+  await page.getByTestId('open-repositories').click()
+  await expect(page.getByRole('heading', { name: 'Repositories' })).toBeVisible()
+}
+
+test('clones from the signed-in GitHub account by searching its repositories', async ({ page }) => {
+  await openRepositoryList(page, {
+    githubRepositories: ['octocat/notes', 'octocat/website', 'acme/handbook'],
+  })
+  await page.getByTestId('repository-clone-open').click()
+  await expect(page.getByTestId('repository-clone-source-github')).toHaveAttribute('aria-checked', 'true')
+  const list = page.getByTestId('repository-clone-github-list')
+  await expect(list.getByRole('button')).toHaveCount(3)
+  await expect(page.getByTestId('repository-clone-confirm')).toBeDisabled()
+
+  await page.getByTestId('repository-clone-search').fill('HAND')
+  await expect(list.getByRole('button')).toHaveCount(1)
+  await snapshot(page, 'repo-10-clone-github')
+  await page.getByTestId('repository-clone-pick-acme/handbook').click()
+  await page.getByTestId('repository-clone-confirm').click()
+  await expect(page.getByTestId('repository-screen')).toBeVisible()
+  const clones = (await mockState(page)).clones as Array<Record<string, unknown>>
+  expect(clones.at(-1)).toMatchObject({ url: 'https://github.com/acme/handbook.git' })
+  expect(clones.at(-1)?.username).toBeUndefined()
+})
+
+test('clones any Git host with a username and token that are remembered next time', async ({ page }) => {
+  await openRepositoryList(page)
+  await page.getByTestId('repository-clone-open').click()
+  await page.getByTestId('repository-clone-source-git').click()
+  await page.getByTestId('repository-clone-url').fill('https://git.example.org/team/notes.git')
+  await page.getByTestId('repository-clone-username').fill('alice')
+  await page.getByTestId('repository-clone-password').fill('glpat-secret')
+  await snapshot(page, 'repo-11-clone-git')
+  await page.getByTestId('repository-clone-confirm').click()
+  await expect(page.getByTestId('repository-screen')).toBeVisible()
+  let clones = (await mockState(page)).clones as Array<Record<string, unknown>>
+  expect(clones.at(-1)).toMatchObject({
+    url: 'https://git.example.org/team/notes.git',
+    username: 'alice',
+    password: 'glpat-secret',
+    remember: true,
+  })
+
+  // The form comes back on the Git tab with the address and username filled
+  // in; the password stays native and an empty field reuses it.
+  await page.getByRole('button', { name: 'Back' }).first().click()
+  await page.getByTestId('repository-clone-open').click()
+  await expect(page.getByTestId('repository-clone-source-git')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('repository-clone-url')).toHaveValue('https://git.example.org/team/notes.git')
+  await expect(page.getByTestId('repository-clone-username')).toHaveValue('alice')
+  await expect(page.getByTestId('repository-clone-password')).toHaveValue('')
+  await expect(page.getByTestId('repository-clone-password')).toHaveAttribute('placeholder', /Saved password/)
+  await page.getByTestId('repository-clone-confirm').click()
+  await expect(page.getByTestId('repository-screen')).toBeVisible()
+  clones = (await mockState(page)).clones as Array<Record<string, unknown>>
+  expect(clones.at(-1)).toMatchObject({ username: 'alice' })
+  expect(clones.at(-1)?.password).toBeUndefined()
+  expect(((await mockState(page)).credentials as Record<string, { password: string }>)['git.example.org'].password)
+    .toBe('glpat-secret')
+})

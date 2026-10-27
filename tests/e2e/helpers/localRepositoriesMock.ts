@@ -11,6 +11,8 @@ export interface LocalRepositoriesMockOptions {
   pull?: 'up-to-date' | 'conflict'
   /** The other side of a conflicting pull, per path. */
   incoming?: MockRepositoryFiles
+  /** Signs in a GitHub account (CloudDocuments mock) listing these `owner/repo` names. */
+  githubRepositories?: string[]
 }
 
 /**
@@ -79,8 +81,18 @@ export async function installLocalRepositoriesMock(page: Page, options: LocalRep
       mine: {} as Files,
       pull: mockOptions.pull ?? 'up-to-date',
       calls: [] as string[],
+      clones: [] as Array<Record<string, unknown>>,
+      /** Native per-host credential store: host -> { username, password }. */
+      credentials: {} as Record<string, { username: string; password: string }>,
     }
     win.__repositoryMock = state
+    const hostOf = (url: unknown) => {
+      try {
+        return new URL(String(url)).host.toLowerCase()
+      } catch {
+        return null
+      }
+    }
 
     const reject = (code: string, message: string, paths: string[] = []) =>
       Promise.reject({ code, message, data: { paths } })
@@ -184,8 +196,32 @@ export async function installLocalRepositoriesMock(page: Page, options: LocalRep
       switch (method) {
         case 'listRepositories':
           return Promise.resolve({ repositories: [summary()] })
-        case 'cloneRepository':
+        case 'cloneRepository': {
+          state.clones.push({ ...args })
+          const host = hostOf(args.url)
+          if (host && host !== 'github.com' && typeof args.username === 'string' && args.username) {
+            const saved = state.credentials[host]
+            const password = typeof args.password === 'string' && args.password
+              ? args.password
+              : saved?.username === args.username ? saved.password : ''
+            if (args.remember !== false) {
+              state.credentials[host] = { username: args.username, password }
+            }
+          }
           return Promise.resolve(summary())
+        }
+        case 'getGitCredentials': {
+          const host = hostOf(args.url)
+          const saved = host ? state.credentials[host] : undefined
+          return Promise.resolve({ host, username: saved?.username ?? null, hasPassword: Boolean(saved?.password) })
+        }
+        case 'forgetGitCredentials': {
+          const host = hostOf(args.url)
+          if (host) {
+            delete state.credentials[host]
+          }
+          return Promise.resolve({})
+        }
         case 'deleteRepository':
           return Promise.resolve({})
         case 'getRepositoryStatus':
@@ -339,6 +375,7 @@ export async function installLocalRepositoriesMock(page: Page, options: LocalRep
       'pushRepository', 'pullRepository', 'resolveRepositoryConflict', 'completeRepositoryMerge',
       'abortRepositoryMerge', 'discardRepositoryChanges', 'listRepositoryBranches', 'checkoutRepositoryBranch',
       'getRepositoryHistory', 'getRepositoryCommitDiff', 'revertRepositoryCommit', 'removeListener',
+      'getGitCredentials', 'forgetGitCredentials',
     ]
     win.Capacitor.PluginHeaders.push({
       name: 'LocalRepositories',
@@ -347,9 +384,32 @@ export async function installLocalRepositoriesMock(page: Page, options: LocalRep
         ...methods.map(name => ({ name, rtype: 'promise' })),
       ],
     })
+    const githubRepositories = mockOptions.githubRepositories
+    if (githubRepositories) {
+      win.Capacitor.PluginHeaders.push({
+        name: 'CloudDocuments',
+        methods: [
+          { name: 'addListener', rtype: 'callback' },
+          ...['removeListener', 'getCloudAccountState', 'listCloudFolder'].map(name => ({ name, rtype: 'promise' })),
+        ],
+      })
+    }
     const basePromise = win.Capacitor.nativePromise.bind(win.Capacitor)
     const baseCallback = win.Capacitor.nativeCallback.bind(win.Capacitor)
     win.Capacitor.nativePromise = (plugin, method, args = {}) => {
+      if (plugin === 'CloudDocuments' && githubRepositories) {
+        if (method === 'getCloudAccountState') {
+          return Promise.resolve(args.provider === 'github'
+            ? { connected: true, available: true, deviceFlowAvailable: false, accountName: 'octocat' }
+            : { connected: false, available: false, accountName: null })
+        }
+        if (method === 'listCloudFolder') {
+          return Promise.resolve({
+            entries: githubRepositories.map(name => ({ id: name, name, isFolder: true, size: 0, lastModified: '' })),
+          })
+        }
+        return Promise.resolve({})
+      }
       if (plugin !== 'LocalRepositories') {
         return basePromise(plugin, method, args)
       }
@@ -359,7 +419,7 @@ export async function installLocalRepositoriesMock(page: Page, options: LocalRep
       return handle(method, args)
     }
     win.Capacitor.nativeCallback = (plugin, method, args, callback) => {
-      if (plugin === 'LocalRepositories' && method === 'addListener') {
+      if ((plugin === 'LocalRepositories' || (plugin === 'CloudDocuments' && githubRepositories)) && method === 'addListener') {
         return Promise.resolve(`local-repositories-listener-${String(args.eventName)}`)
       }
       return baseCallback(plugin, method, args, callback)

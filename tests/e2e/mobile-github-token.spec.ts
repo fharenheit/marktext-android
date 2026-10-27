@@ -51,7 +51,7 @@ async function installGitHubTokenMock(page: Page) {
       }
       if (method === 'listCloudFolder') {
         return Promise.resolve({
-          entries: [{ id: 'cloud:github:octocat/notes', name: 'octocat/notes', isFolder: true, size: 0, lastModified: '' }],
+          entries: [{ id: 'octocat/notes', name: 'octocat/notes', isFolder: true, size: 0, lastModified: '' }],
         })
       }
       return Promise.resolve({})

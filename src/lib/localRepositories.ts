@@ -110,7 +110,18 @@ interface LocalRepositoriesPlugin {
     listener: (event: RepositoryProgressEvent) => void,
   ): Promise<PluginListenerHandle>
   listRepositories(): Promise<{ repositories: LocalRepositorySummary[] }>
-  cloneRepository(options: { url: string; branch?: string; name?: string }): Promise<LocalRepositorySummary>
+  cloneRepository(options: {
+    url: string
+    branch?: string
+    name?: string
+    /** Non-GitHub hosts: an empty password reuses the one remembered for this host and username. */
+    username?: string
+    password?: string
+    remember?: boolean
+  }): Promise<LocalRepositorySummary>
+  /** The remembered sign-in for a host; the password itself never leaves native storage. */
+  getGitCredentials(options: { url: string }): Promise<{ host: string | null; username: string | null; hasPassword: boolean }>
+  forgetGitCredentials(options: { url: string }): Promise<void>
   deleteRepository(options: { id: string }): Promise<void>
   getRepositoryStatus(options: { id: string }): Promise<RepositoryStatus>
   listRepositoryFolder(options: { id: string; path: string }): Promise<{ entries: RepositoryEntry[] }>
@@ -191,7 +202,7 @@ export function getRepositoryUserMessage(error: unknown) {
     case 'REMOTE_NOT_FOUND':
       return 'The repository was not found, or this account cannot access it.'
     case 'AUTH_FAILED':
-      return 'GitHub refused the sign-in. Connect the GitHub account again.'
+      return 'The sign-in was refused. Check the GitHub account, or the username and password or token.'
     case 'NETWORK_FAILED':
       return 'Could not reach the remote. Check the connection and try again.'
     case 'NOTHING_TO_COMMIT':
