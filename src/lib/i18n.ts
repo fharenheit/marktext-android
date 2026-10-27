@@ -61,6 +61,7 @@ const KNOWN_TEXT_MESSAGE_KEYS = {
   'Not committed': 'app.status.notCommitted',
   Committing: 'app.status.committing',
   Committed: 'app.status.committed',
+  Reverted: 'app.status.reverted',
   'Choose a location': 'app.status.chooseLocation',
   Sharing: 'app.status.sharing',
   'Exporting PDF': 'app.status.exportingPdf',

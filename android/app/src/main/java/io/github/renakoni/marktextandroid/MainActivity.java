@@ -47,6 +47,7 @@ public class MainActivity extends BridgeActivity {
 
         registerPlugin(AndroidDocumentsPlugin.class);
         registerPlugin(CloudDocumentsPlugin.class);
+        registerPlugin(LocalRepositoriesPlugin.class);
         registerPlugin(NativeLoggerPlugin.class);
         registerPlugin(AndroidAppInfoPlugin.class);
         registerPlugin(AndroidSelectionPlugin.class);

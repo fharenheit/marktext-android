@@ -65,6 +65,8 @@ const props = defineProps<{
   androidSaving: boolean
   canCommit: boolean
   committing: boolean
+  canShowChanges: boolean
+  canRevertChanges: boolean
   incomingOpenPromptOpen: boolean
   incomingOpenName: string
   textDirection: 'ltr' | 'rtl'
@@ -118,6 +120,8 @@ const emit = defineEmits<{
   'save-to-device': []
   'save-copy': []
   commit: []
+  'show-changes': []
+  'revert-changes': []
   'run-toolbar-command': [commandId: MobileCommandId, restoreRange: Range | null]
   'run-table-command': [commandId: TableCommandId]
   'run-selection-command': [commandId: SelectionToolbarCommandId, restoreRange: Range | null]
@@ -679,6 +683,8 @@ onBeforeUnmount(() => {
         :can-save-copy="canSaveCopy"
         :can-commit="canCommit"
         :committing="committing"
+        :can-show-changes="canShowChanges"
+        :can-revert-changes="canRevertChanges"
         :sharing="sharing"
         :exporting-pdf="exportingPdf"
         :saving-to-device="savingToDevice"
@@ -691,6 +697,8 @@ onBeforeUnmount(() => {
         @save-to-device="emit('save-to-device')"
         @save-copy="emit('save-copy')"
         @commit="emit('commit')"
+        @show-changes="emit('show-changes')"
+        @revert-changes="emit('revert-changes')"
       />
     </Transition>
 

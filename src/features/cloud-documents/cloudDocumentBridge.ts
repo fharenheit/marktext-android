@@ -16,6 +16,11 @@ import {
 } from '../../lib/cloudDocuments'
 import { buildCloudSourceUri, parseCloudSourceUri } from '../../lib/cloudDocumentUris'
 import { prepareLocalImagesForCommit } from './githubImages'
+import { isRepositorySourceUri } from '../../lib/localRepositoryUris'
+import {
+  readRepositoryMarkdownDocument,
+  writeRepositoryMarkdownDocument,
+} from '../local-repos/repositoryDocumentBridge'
 
 /**
  * GitHub saves are commits: autosave must never write them, only an
@@ -33,6 +38,16 @@ export function requiresExplicitCommit(sourceUri: string | null | undefined) {
  */
 const cloudDocumentETags = new Map<string, string>()
 
+/**
+ * The text each cloud document had when last read or saved, so "show
+ * changes" can diff the editor against it. Process-lifetime like the tags.
+ */
+const cloudDocumentBaselines = new Map<string, string>()
+
+export function getCloudDocumentBaseline(sourceUri: string): string | null {
+  return cloudDocumentBaselines.get(sourceUri) ?? null
+}
+
 const CLOUD_PROVIDER_LABELS: Record<CloudProviderId, string> = {
   onedrive: 'OneDrive',
   googledrive: 'Google Drive',
@@ -46,6 +61,7 @@ export function toOpenedDocumentFromCloud(
 ): OpenedAndroidDocument {
   const sourceUri = buildCloudSourceUri(provider, content.fileId)
   cloudDocumentETags.set(sourceUri, content.eTag)
+  cloudDocumentBaselines.set(sourceUri, content.markdown)
   return {
     canceled: false,
     sourceUri,
@@ -85,6 +101,7 @@ export async function createRoutedCloudDocument(
   })
   const sourceUri = buildCloudSourceUri(provider, created.fileId)
   cloudDocumentETags.set(sourceUri, created.eTag)
+  cloudDocumentBaselines.set(sourceUri, markdown)
   return {
     canceled: false,
     sourceUri,
@@ -110,6 +127,9 @@ export async function readRoutedMarkdownDocument(
   sourceUri: string,
   options: AndroidReadOptions = {},
 ): Promise<OpenedAndroidDocument> {
+  if (isRepositorySourceUri(sourceUri)) {
+    return readRepositoryMarkdownDocument(sourceUri, options)
+  }
   const cloud = parseCloudSourceUri(sourceUri)
   if (!cloud) {
     return readAndroidMarkdownDocument(sourceUri, options)
@@ -124,6 +144,9 @@ export async function writeRoutedMarkdownDocument(
   markdown: string,
   options: AndroidWriteOptions,
 ): Promise<SavedAndroidDocument> {
+  if (isRepositorySourceUri(sourceUri)) {
+    return writeRepositoryMarkdownDocument(sourceUri, markdown, options)
+  }
   const cloud = parseCloudSourceUri(sourceUri)
   if (!cloud) {
     return writeAndroidMarkdownDocument(sourceUri, markdown, options)
@@ -154,6 +177,7 @@ export async function writeRoutedMarkdownDocument(
     ...(prepared.images.length ? { localImages: prepared.images } : {}),
   })
   cloudDocumentETags.set(sourceUri, written.eTag)
+  cloudDocumentBaselines.set(sourceUri, markdown)
   return {
     sourceUri,
     displayName: written.displayName,
@@ -219,6 +243,7 @@ export async function commitRoutedCloudDocumentToNewBranch(
 
   const branchSourceUri = buildCloudSourceUri('github', written.fileId)
   cloudDocumentETags.set(branchSourceUri, written.eTag)
+  cloudDocumentBaselines.set(branchSourceUri, markdown)
   const [owner, repo] = written.fileId.split('/')
   const path = cloud.fileId.split('/')[3]
   return {

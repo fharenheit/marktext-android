@@ -183,6 +183,17 @@ describe('appExitDecisions', () => {
     expect(getAppBackButtonAction(baseBackState)).toBe('exit-app')
   })
 
+  it('unwinds the repository screens and the changes view', () => {
+    expect(getAppBackButtonAction({ ...baseBackState, currentScreen: 'repository' })).toBe('repository-back')
+    expect(getAppBackButtonAction({ ...baseBackState, currentScreen: 'repositories' })).toBe('show-open-locations')
+    expect(getAppBackButtonAction({
+      ...baseBackState,
+      currentScreen: 'editor',
+      documentChangesOpen: true,
+      editorMenuOpen: true,
+    })).toBe('close-document-changes')
+  })
+
   it('cancels the commit sheet before the editor prompts beneath it', () => {
     expect(getAppBackButtonAction({
       ...baseBackState,

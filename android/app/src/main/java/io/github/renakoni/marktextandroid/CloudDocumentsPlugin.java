@@ -42,12 +42,12 @@ public class CloudDocumentsPlugin extends Plugin {
     private static final String PROVIDER_GOOGLEDRIVE = "googledrive";
     private static final String PROVIDER_GITHUB = "github";
     private static final String PROVIDER_WEBDAV = "webdav";
-    private static final String CLOUD_PREFS = "cloud_documents";
+    static final String CLOUD_PREFS = "cloud_documents";
     private static final String PREF_ONEDRIVE_TOKENS = "onedrive_tokens";
     private static final String PREF_ONEDRIVE_PENDING_AUTH = "onedrive_pending_auth";
     private static final String PREF_GOOGLEDRIVE_TOKENS = "googledrive_tokens";
     private static final String PREF_GOOGLEDRIVE_PENDING_AUTH = "googledrive_pending_auth";
-    private static final String PREF_GITHUB_TOKENS = "github_tokens";
+    static final String PREF_GITHUB_TOKENS = "github_tokens";
     /** Unused: the device flow keeps no pending record across restarts. */
     private static final String PREF_GITHUB_PENDING_AUTH = "github_pending_auth";
     private static final String EVENT_AUTH_COMPLETED = "cloudAuthCompleted";

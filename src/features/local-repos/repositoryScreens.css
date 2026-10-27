@@ -1,0 +1,334 @@
+/* Shared by the repository list and repository screens (class-prefixed,
+   so unscoped on purpose). */
+.repository-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  color: var(--text);
+  background: var(--app-bg);
+}
+
+.repository-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: max(12px, env(safe-area-inset-top)) 8px 8px 4px;
+}
+
+.repository-back,
+.repository-icon-button {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: none;
+  color: var(--text);
+  border-radius: var(--radius-sm);
+}
+
+.repository-icon-button {
+  color: var(--text-muted);
+}
+
+.repository-back:active,
+.repository-icon-button:active,
+.repository-entry:active,
+.repository-header-action:active {
+  background: var(--press);
+}
+
+.repository-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 20px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repository-subtitle {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repository-header-action {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+}
+
+.repository-header-action:disabled {
+  opacity: 0.5;
+}
+
+.repository-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 12px 8px;
+  overflow-x: auto;
+}
+
+.repository-tab {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  border-radius: 999px;
+}
+
+.repository-tab[aria-selected='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.repository-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 12px calc(24px + env(safe-area-inset-bottom));
+}
+
+.repository-notice {
+  margin: 8px 4px 12px;
+  padding: 10px 12px;
+  font-size: 14px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.repository-hint {
+  margin: 12px 4px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.repository-card {
+  margin: 4px 0 16px;
+  padding: 12px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.repository-section-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.repository-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 8px;
+  padding: 10px 12px;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--surface, transparent);
+  border: 1px solid var(--border, currentColor);
+  border-radius: var(--radius-sm);
+}
+
+.repository-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.repository-primary,
+.repository-secondary,
+.repository-danger {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+}
+
+.repository-primary {
+  border: none;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.repository-secondary {
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+}
+
+.repository-danger {
+  border: 1px solid var(--danger);
+  background: none;
+  color: var(--danger);
+}
+
+.repository-primary:disabled,
+.repository-secondary:disabled,
+.repository-danger:disabled {
+  opacity: 0.5;
+}
+
+.repository-small {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.repository-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.repository-chip {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  border-radius: 999px;
+}
+
+.repository-chip-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.repository-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.repository-list-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.repository-entry {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px 10px;
+  border: none;
+  background: none;
+  color: var(--text);
+  text-align: start;
+  border-radius: var(--radius-sm);
+}
+
+.repository-entry-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--accent-strong);
+}
+
+.repository-entry-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.repository-entry-name {
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repository-entry-meta {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repository-badge {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  border-radius: 999px;
+}
+
+.repository-badge-added {
+  color: #2da44e;
+  background: rgba(45, 164, 78, 0.16);
+}
+
+.repository-badge-modified {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.repository-badge-deleted,
+.repository-badge-conflicting {
+  color: var(--danger);
+  background: rgba(207, 34, 46, 0.14);
+}
+
+.repository-banner {
+  margin: 4px 0 12px;
+  padding: 12px;
+  background: var(--surface-raised);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+}
+
+.repository-banner p {
+  margin: 4px 0 8px;
+  font-size: 14px;
+}
+
+.repository-conflict {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.repository-conflict-path {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.repository-breadcrumb {
+  margin: 0 4px 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.repository-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-bg);
+}

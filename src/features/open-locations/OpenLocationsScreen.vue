@@ -23,6 +23,7 @@ const emit = defineEmits<{
   openOneDrive: []
   openGoogleDrive: []
   openGitHub: []
+  openRepositories: []
   disconnectOneDrive: []
   disconnectGoogleDrive: []
   disconnectGitHub: []
@@ -229,6 +230,31 @@ const { t } = useI18n()
           </svg>
         </button>
       </div>
+
+      <button
+        v-if="mode !== 'save'"
+        type="button"
+        class="open-location-row"
+        data-testid="open-repositories"
+        @click="emit('openRepositories')"
+      >
+        <span class="open-location-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24">
+            <path
+              d="M4 6.5A1.5 1.5 0 0 1 5.5 5h4l2 2h7A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5Zm7.5 4.5v5m-2.5-2.5 2.5 2.5 2.5-2.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </span>
+        <span class="open-location-text">
+          <span class="open-location-label">{{ t('openLocations.repositories') }}</span>
+          <span class="open-location-subtitle">{{ t('openLocations.repositoriesSubtitle') }}</span>
+        </span>
+      </button>
 
       <p v-if="notice" class="open-locations-notice" role="alert">{{ notice }}</p>
     </div>

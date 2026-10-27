@@ -32,13 +32,29 @@ import {
   type CloudFolderEntry,
 } from './lib/cloudDocuments'
 import { createGoogleDrivePickFlow } from './features/open-locations/googleDrivePickFlow'
-import { isCloudSourceUri, parseCloudSourceUri } from './lib/cloudDocumentUris'
+import { parseCloudSourceUri } from './lib/cloudDocumentUris'
+import {
+  buildRepositorySourceUri,
+  isAppRoutedSourceUri,
+  isRepositorySourceUri,
+} from './lib/localRepositoryUris'
+import type { LocalRepositorySummary } from './lib/localRepositories'
+import RepositoryListScreen from './features/local-repos/RepositoryListScreen.vue'
+import RepositoryScreen from './features/local-repos/RepositoryScreen.vue'
+import DocumentChangesView from './features/local-repos/DocumentChangesView.vue'
+import ConfirmSheet from './features/local-repos/ConfirmSheet.vue'
+import {
+  getRepositoryDocumentChanges,
+  resolveRepositoryImageSource,
+  revertRepositoryDocument,
+} from './features/local-repos/repositoryDocumentBridge'
 import { resolveGitHubImageSource } from './features/cloud-documents/githubImages'
 import type { GitHubDocumentLink } from './features/cloud-documents/githubLinks'
 import {
   createRoutedCloudDocument,
   readRoutedMarkdownDocument,
   commitRoutedCloudDocumentToNewBranch,
+  getCloudDocumentBaseline,
   requiresExplicitCommit,
   toOpenedDocumentFromCloud,
   type NewBranchCommitResult,
@@ -1432,14 +1448,14 @@ const syncAndroidDocumentGrants = createDocumentGrantSync()
 function requestAndroidDocumentGrantCleanup() {
   syncAndroidDocumentGrants({
     currentDocument: {
-      sourceUri: isCloudSourceUri(documentState.value.sourceUri)
+      sourceUri: isAppRoutedSourceUri(documentState.value.sourceUri)
         ? null
         : documentState.value.sourceUri,
     },
-    // cloud: source URIs have no SAF grant; keep the referenced set to
-    // real content:// URIs.
+    // cloud: and repo: source URIs have no SAF grant; keep the referenced
+    // set to real content:// URIs.
     recentDocuments: androidRecentDocuments.value.filter(
-      record => !isCloudSourceUri(record.sourceUri),
+      record => !isAppRoutedSourceUri(record.sourceUri),
     ),
   })
     .then(result => {
@@ -1539,11 +1555,16 @@ watch(
   sourceUri => {
     const cloud = parseCloudSourceUri(sourceUri)
     const fileId = cloud?.provider === 'github' ? cloud.fileId : null
-    setDocumentImageResolver(
-      fileId === null
-        ? null
-        : source => resolveGitHubImageSource(source, fileId, window.location.origin),
-    )
+    if (isRepositorySourceUri(sourceUri)) {
+      // Working-copy documents show their images straight from disk.
+      setDocumentImageResolver(source => resolveRepositoryImageSource(source, sourceUri))
+    } else {
+      setDocumentImageResolver(
+        fileId === null
+          ? null
+          : source => resolveGitHubImageSource(source, fileId, window.location.origin),
+      )
+    }
     // The native scope only changes with the GitHub document; switching
     // between other documents needs no bridge round trip.
     if (fileId === githubImageContextFileId) {
@@ -1558,6 +1579,134 @@ watch(
   },
   { flush: 'sync', immediate: true },
 )
+
+// --- Repositories on the device (local Git working copies) ---
+
+const activeRepository = ref<LocalRepositorySummary | null>(null)
+const repositoryScreen = ref<InstanceType<typeof RepositoryScreen> | null>(null)
+// A document opened from the repository screen returns there when closed.
+let returnToRepositoryAfterEditor = false
+
+function showRepositories() {
+  currentScreen.value = 'repositories'
+}
+
+function openRepository(repository: LocalRepositorySummary) {
+  activeRepository.value = repository
+  currentScreen.value = 'repository'
+}
+
+async function openRepositoryDocument(path: string) {
+  const repository = activeRepository.value
+  if (!repository) {
+    return
+  }
+  try {
+    const document = await readRoutedMarkdownDocument(
+      buildRepositorySourceUri(repository.id, path),
+      androidMarkdownSettings.value,
+    )
+    returnToRepositoryAfterEditor = true
+    await openAndroidDocumentResult(document)
+  } catch (error) {
+    repositoryScreen.value?.showNotice(getAndroidDocumentUserMessage(error))
+    androidDocumentLog.warn('repository document open failed', { path, error })
+  }
+}
+
+function repositoryBack() {
+  if (!repositoryScreen.value?.handleBack()) {
+    currentScreen.value = 'repositories'
+  }
+}
+
+// --- Show changes / revert changes for repository and cloud documents ---
+
+const documentChanges = ref<{
+  oldText: string | null
+  newText: string | null
+  baselineLabel: string
+  canRevert: boolean
+} | null>(null)
+const revertConfirmOpen = ref(false)
+
+function canShowDocumentChanges() {
+  const sourceUri = documentState.value.sourceUri
+  return isRepositorySourceUri(sourceUri)
+    || (sourceUri !== null && getCloudDocumentBaseline(sourceUri) !== null)
+}
+
+/**
+ * Repository documents can always go back to their last commit; GitHub
+ * documents (commit-only) to the version on GitHub while edits are
+ * uncommitted. Autosaved cloud documents have nothing older to go back to.
+ */
+function canRevertDocumentChanges() {
+  const sourceUri = documentState.value.sourceUri
+  return isRepositorySourceUri(sourceUri)
+    || (requiresExplicitCommit(sourceUri) && documentState.value.isDirty)
+}
+
+async function showDocumentChanges() {
+  closeEditorMenu()
+  const sourceUri = documentState.value.sourceUri
+  if (!sourceUri) {
+    return
+  }
+  try {
+    if (isRepositorySourceUri(sourceUri)) {
+      // Flush the autosave so the working tree holds exactly the editor text.
+      await saveAndroidDocument({ waitForPendingSave: true })
+      const sides = await getRepositoryDocumentChanges(sourceUri)
+      documentChanges.value = {
+        ...sides,
+        baselineLabel: t('changes.sinceCommit'),
+        canRevert: sides.oldText !== sides.newText,
+      }
+      return
+    }
+    const current = syncDocumentFromEditor(documentState.value.isDirty, true)
+    const baseline = getCloudDocumentBaseline(sourceUri)
+    documentChanges.value = {
+      oldText: baseline,
+      newText: current.markdown,
+      baselineLabel: t('changes.sinceSave'),
+      canRevert: canRevertDocumentChanges(),
+    }
+  } catch (error) {
+    status.value = getAndroidDocumentUserMessage(error)
+  }
+}
+
+function requestRevertDocumentChanges() {
+  closeEditorMenu()
+  revertConfirmOpen.value = true
+}
+
+async function revertDocumentChanges() {
+  revertConfirmOpen.value = false
+  documentChanges.value = null
+  const sourceUri = documentState.value.sourceUri
+  if (!sourceUri) {
+    return
+  }
+  try {
+    // Settle any in-flight autosave first, so it cannot rewrite the edits
+    // after they were reverted.
+    await saveAndroidDocument({ waitForPendingSave: true })
+    clearAndroidDocumentSaveTimer()
+    if (isRepositorySourceUri(sourceUri)) {
+      await revertRepositoryDocument(sourceUri)
+    }
+    removeAndroidRecoveryDraft(sourceUri)
+    const document = await readRoutedMarkdownDocument(sourceUri, androidMarkdownSettings.value)
+    await openAndroidDocumentResult(document)
+    status.value = 'Reverted'
+  } catch (error) {
+    status.value = getAndroidDocumentUserMessage(error)
+    androidDocumentLog.error('revert document failed', { sourceUri, error })
+  }
+}
 
 // --- GitHub commits: the only way edits of a commit-only document reach
 // the repository (autosave keeps them as a recovery draft meanwhile).
@@ -2570,6 +2719,12 @@ async function installCjkBoldCompensation() {
 }
 
 function closeEditorToHome() {
+  const returnToRepository = returnToRepositoryAfterEditor
+    && isRepositorySourceUri(documentState.value.sourceUri)
+    && activeRepository.value !== null
+  returnToRepositoryAfterEditor = false
+  documentChanges.value = null
+  revertConfirmOpen.value = false
   // Write the resume position while the editor still exists; the session is
   // gone right after, so a late flush cannot double-write.
   void persistResumePosition('editor closed')
@@ -2586,7 +2741,7 @@ function closeEditorToHome() {
   destroyEditor()
   homeTab.value = HOME_TABS.DOCUMENTS
   settingsPage.value = DEFAULT_SETTINGS_PAGE
-  currentScreen.value = 'home'
+  currentScreen.value = returnToRepository ? 'repository' : 'home'
 }
 
 function setHomeTab(tab: HomeTab) {
@@ -2767,6 +2922,7 @@ async function handleAppBackButton() {
     cloudBrowserSaveModeActive: cloudBrowserSaveModeActive.value,
     cloudNameSheetOpen: cloudNameSheetOpen.value,
     commitSheetOpen: commitSheetOpen.value || pullRequestResult.value !== null,
+    documentChangesOpen: documentChanges.value !== null || revertConfirmOpen.value,
     googleDriveFolderPickActive: googleDrivePickingFolder.value,
     cloudSaveInProgress: cloudSaveInProgress.value !== null,
   })
@@ -2824,6 +2980,16 @@ async function handleAppBackButton() {
       return
     case 'cancel-commit':
       cancelCommit()
+      return
+    case 'close-document-changes':
+      if (revertConfirmOpen.value) {
+        revertConfirmOpen.value = false
+      } else {
+        documentChanges.value = null
+      }
+      return
+    case 'repository-back':
+      repositoryBack()
       return
     case 'cancel-cloud-name':
       resolveCloudDocumentName(null)
@@ -3188,6 +3354,22 @@ onBeforeUnmount(() => {
     @disconnect-one-drive="disconnectOneDrive"
     @disconnect-google-drive="disconnectGoogleDrive"
     @disconnect-git-hub="disconnectGitHub"
+    @open-repositories="showRepositories"
+  />
+
+  <RepositoryListScreen
+    v-else-if="currentScreen === 'repositories'"
+    @back="currentScreen = 'open-locations'"
+    @open-repository="openRepository"
+  />
+
+  <RepositoryScreen
+    v-else-if="currentScreen === 'repository' && activeRepository"
+    ref="repositoryScreen"
+    :key="activeRepository.id"
+    :repository="activeRepository"
+    @back="currentScreen = 'repositories'"
+    @open-document="openRepositoryDocument"
   />
 
   <CloudBrowserScreen
@@ -3246,6 +3428,8 @@ onBeforeUnmount(() => {
     :saving-to-device="savingLocalDraftToAndroid"
     :saving-copy="savingAndroidDocumentCopy"
     :can-commit="canCommitCurrentDocument() && documentState.isDirty"
+    :can-show-changes="canShowDocumentChanges()"
+    :can-revert-changes="canRevertDocumentChanges()"
     :committing="committingDocument"
     :link-sheet-open="linkSheetOpen"
     :table-sheet-open="tableSheetOpen"
@@ -3313,6 +3497,8 @@ onBeforeUnmount(() => {
     @save-copy="saveAndroidDocumentCopy"
     @commit="openCommitSheet(false)"
     @commit-android-exit="openCommitSheet(true)"
+    @show-changes="showDocumentChanges"
+    @revert-changes="requestRevertDocumentChanges"
     @run-toolbar-command="runEditorToolbarCommand"
     @run-table-command="runEditorTableCommand"
     @run-selection-command="runEditorSelectionCommand"
@@ -3397,6 +3583,26 @@ onBeforeUnmount(() => {
     :committing="committingDocument"
     @confirm="confirmCommit"
     @cancel="cancelCommit"
+  />
+
+  <DocumentChangesView
+    v-if="documentChanges && currentScreen === 'editor'"
+    :document-name="documentState.displayName"
+    :baseline-label="documentChanges.baselineLabel"
+    :old-text="documentChanges.oldText"
+    :new-text="documentChanges.newText"
+    :can-revert="documentChanges.canRevert"
+    @close="documentChanges = null"
+    @revert="revertConfirmOpen = true"
+  />
+
+  <ConfirmSheet
+    v-if="revertConfirmOpen"
+    :message="t('changes.revertConfirm')"
+    :confirm-label="t('editor.actions.revertChanges')"
+    danger
+    @confirm="revertDocumentChanges"
+    @cancel="revertConfirmOpen = false"
   />
 
   <GitHubPullRequestSheet

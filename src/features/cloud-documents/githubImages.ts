@@ -23,7 +23,27 @@ export function resolveGitHubImageSource(
     return null
   }
   const [owner, repo, encodedRef, encodedPath] = idParts
+  let documentPath: string
+  try {
+    documentPath = decodeURIComponent(encodedPath)
+  } catch {
+    return null
+  }
+  const imagePath = resolveRepositoryRelativePath(source, documentPath)
+  return imagePath === null
+    ? null
+    : `${origin}${GITHUB_IMAGE_PATH_PREFIX}${owner}/${repo}/${encodedRef}/${encodeURIComponent(imagePath)}`
+}
 
+/**
+ * Resolves a link or image source written in the repository document at
+ * `documentPath` to a repository path: relative sources against the
+ * document's folder, `/`-rooted ones against the repository root (as
+ * GitHub renders them). Sources with a scheme (https:, data:,
+ * marktext-image:), protocol-relative or fragment-only sources, and paths
+ * escaping the repository return null.
+ */
+export function resolveRepositoryRelativePath(source: string, documentPath: string): string | null {
   const trimmed = source.trim()
   if (
     trimmed.length === 0
@@ -34,12 +54,9 @@ export function resolveGitHubImageSource(
     return null
   }
 
-  const rawPath = trimmed.split(/[?#]/)[0]
   let imagePath: string
-  let documentPath: string
   try {
-    imagePath = decodeURIComponent(rawPath)
-    documentPath = decodeURIComponent(encodedPath)
+    imagePath = decodeURIComponent(trimmed.split(/[?#]/)[0])
   } catch {
     return null
   }
@@ -58,11 +75,7 @@ export function resolveGitHubImageSource(
     }
     segments.push(segment)
   }
-  if (segments.length === 0) {
-    return null
-  }
-
-  return `${origin}${GITHUB_IMAGE_PATH_PREFIX}${owner}/${repo}/${encodedRef}/${encodeURIComponent(segments.join('/'))}`
+  return segments.length === 0 ? null : segments.join('/')
 }
 
 /** Images inserted on the device live in app storage under these names. */
@@ -99,6 +112,17 @@ export function prepareLocalImagesForCommit(
   } catch {
     return { markdown, images: [] }
   }
+  return prepareLocalImagesForDocument(markdown, documentPath)
+}
+
+/**
+ * The repository-path form of {@link prepareLocalImagesForCommit}, shared
+ * by GitHub commits and local working copies.
+ */
+export function prepareLocalImagesForDocument(
+  markdown: string,
+  documentPath: string,
+): { markdown: string; images: CommittedLocalImage[] } {
   const folder = documentPath.split('/').slice(0, -1)
 
   const images = new Map<string, CommittedLocalImage>()

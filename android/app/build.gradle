@@ -56,6 +56,15 @@ android {
             java.srcDirs += '../../third_party/icu4j-charset-detector/java'
         }
     }
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+    }
+    packagingOptions {
+        resources {
+            // JGit ships OSGi/Eclipse metadata that collides across jars.
+            excludes += ['META-INF/DEPENDENCIES', 'plugin.properties', 'about.html']
+        }
+    }
     buildTypes {
         release {
             if (releaseSigningConfigured) {
@@ -117,6 +126,15 @@ dependencies {
     // Custom Tabs for the cloud OAuth trips (real browser session, in-app feel).
     implementation "androidx.browser:browser:1.8.0"
     implementation project(':capacitor-android')
+    // Local Git working copies (clone, commit, push, pull, merge). 5.13 is
+    // the last JGit line that runs on Java 8 APIs; it still uses
+    // java.nio.file, which API 24/25 only get through the nio desugaring
+    // library below.
+    implementation("org.eclipse.jgit:org.eclipse.jgit:5.13.3.202401111512-r") {
+        // GPG signing support (Bouncy Castle) is never used and is large.
+        exclude group: 'org.bouncycastle'
+    }
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs_nio:2.1.5"
     testImplementation "junit:junit:$junitVersion"
     // Real org.json for JVM unit tests; android.jar only carries stubs.
     testImplementation "org.json:json:20240303"

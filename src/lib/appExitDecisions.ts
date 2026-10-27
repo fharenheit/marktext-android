@@ -2,7 +2,14 @@ import { HOME_TABS, type HomeTab } from '../features/home/homeNavigation'
 import { SETTINGS_PAGES, type SettingsPage } from '../features/settings/settingsNavigation'
 import type { AutosaveTarget } from './documentState'
 
-export type AppScreen = 'home' | 'editor' | 'open-locations' | 'cloud-browser' | 'save-locations'
+export type AppScreen =
+  | 'home'
+  | 'editor'
+  | 'open-locations'
+  | 'cloud-browser'
+  | 'save-locations'
+  | 'repositories'
+  | 'repository'
 
 export type ShowHomeDocumentSaveAction = 'save-android-document' | 'save-local-draft'
 
@@ -35,6 +42,8 @@ export interface AppBackButtonState {
   /** True while the save-as name sheet is open. */
   cloudNameSheetOpen?: boolean
   commitSheetOpen?: boolean
+  /** True while the editor's "show changes" diff is open. */
+  documentChangesOpen?: boolean
   /** True while the save-as Drive folder pick waits on the browser trip. */
   googleDriveFolderPickActive?: boolean
   /** True while a cloud create is in flight; Back must not interrupt it. */
@@ -60,6 +69,8 @@ export type AppBackButtonAction =
   | 'cancel-save-destination'
   | 'cancel-cloud-name'
   | 'cancel-commit'
+  | 'close-document-changes'
+  | 'repository-back'
   | 'cancel-google-folder-pick'
   | 'cancel-onedrive-folder-pick'
   | 'ignore-cloud-save'
@@ -115,6 +126,7 @@ export function getAppBackButtonAction({
   cloudBrowserSaveModeActive,
   cloudNameSheetOpen,
   commitSheetOpen,
+  documentChangesOpen,
   googleDriveFolderPickActive,
   cloudSaveInProgress,
 }: AppBackButtonState): AppBackButtonAction {
@@ -133,6 +145,10 @@ export function getAppBackButtonAction({
   // flight still cancels only the sheet's chrome (the App ignores it).
   if (commitSheetOpen) {
     return 'cancel-commit'
+  }
+
+  if (documentChangesOpen) {
+    return 'close-document-changes'
   }
 
   if (googleDriveFolderPickActive) {
@@ -203,6 +219,16 @@ export function getAppBackButtonAction({
   // Open page (the save-mode browser is handled above the editor layers).
   if (currentScreen === 'cloud-browser') {
     return cloudBrowserAtRoot === false ? 'cloud-browser-up' : 'show-open-locations'
+  }
+
+  // The repository screen unwinds its own views (diff, commit, folder)
+  // before returning to the repository list.
+  if (currentScreen === 'repository') {
+    return 'repository-back'
+  }
+
+  if (currentScreen === 'repositories') {
+    return 'show-open-locations'
   }
 
   if (currentScreen === 'open-locations') {

@@ -11,6 +11,9 @@ defineProps<{
   /** Commit-only sources (GitHub): saving is an explicit commit. */
   canCommit: boolean
   committing: boolean
+  /** Repository and cloud documents: diff against the last commit or save. */
+  canShowChanges: boolean
+  canRevertChanges: boolean
   sharing: boolean
   exportingPdf: boolean
   savingToDevice: boolean
@@ -25,6 +28,8 @@ const emit = defineEmits<{
   'save-to-device': []
   'save-copy': []
   commit: []
+  'show-changes': []
+  'revert-changes': []
   'toggle-source-mode': []
 }>()
 
@@ -86,6 +91,36 @@ const { onModalKeydown } = useModalFocus({
             </svg>
           </span>
           <span class="editor-action-label">{{ t('editor.actions.commit') }}</span>
+        </button>
+        <button
+          v-if="canShowChanges"
+          class="editor-action-row"
+          type="button"
+          role="menuitem"
+          data-testid="show-changes-button"
+          @click="emit('show-changes')"
+        >
+          <span class="editor-action-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M7 4v10M2 9h10M12 20h10" />
+            </svg>
+          </span>
+          <span class="editor-action-label">{{ t('editor.actions.showChanges') }}</span>
+        </button>
+        <button
+          v-if="canRevertChanges"
+          class="editor-action-row"
+          type="button"
+          role="menuitem"
+          data-testid="revert-changes-button"
+          @click="emit('revert-changes')"
+        >
+          <span class="editor-action-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+            </svg>
+          </span>
+          <span class="editor-action-label">{{ t('editor.actions.revertChanges') }}</span>
         </button>
         <button
           v-if="canShare"
