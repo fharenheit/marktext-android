@@ -660,6 +660,7 @@ const {
   getEditor,
   hasEditor,
   getEditorMarkdownSnapshot,
+  rebaseSourceFormatting,
   syncDocumentFromEditor,
   openEditor: openEditorSessionDocument,
   destroyEditor,
@@ -723,6 +724,7 @@ sourceModeController = createSourceModeController({
   getEditor: () => getEditor(),
   getMarkdownSnapshot: flushPending => getEditorMarkdownSnapshot(flushPending),
   onDocumentEdited: () => syncMarkdown('Edited'),
+  onHandedBack: text => rebaseSourceFormatting(text),
   logger: editorLog,
 })
 const sourceMode = sourceModeController

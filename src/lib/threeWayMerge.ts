@@ -26,15 +26,29 @@ interface Change {
   lines: string[]
 }
 
-function changesFrom(base: string, side: string): Change[] {
+/**
+ * Lines are compared by `lineKey` (identity by default) so formatting-only
+ * differences can count as equal; replacements keep the side's real lines.
+ */
+function changesFrom(
+  baseLines: string[],
+  sideLines: string[],
+  lineKey: (line: string) => string,
+  /** Filled with the side's own text of each base line it left unchanged. */
+  unchangedText?: string[],
+): Change[] {
   const changes: Change[] = []
   let baseIndex = 0
   let current: Change | null = null
-  for (const line of diffLines(base, side)) {
+  const keyed = (lines: string[]) => lines.length ? `${lines.map(lineKey).join('\n')}\n` : ''
+  for (const line of diffLines(keyed(baseLines), keyed(sideLines))) {
     if (line.kind === 'context') {
       if (current) {
         changes.push(current)
         current = null
+      }
+      if (unchangedText) {
+        unchangedText[baseIndex] = sideLines[(line.newNumber ?? 1) - 1]
       }
       baseIndex += 1
       continue
@@ -44,7 +58,7 @@ function changesFrom(base: string, side: string): Change[] {
       baseIndex += 1
       current.end = baseIndex
     } else {
-      current.lines.push(line.text)
+      current.lines.push(sideLines[(line.newNumber ?? 1) - 1])
     }
   }
   if (current) {
@@ -54,7 +68,7 @@ function changesFrom(base: string, side: string): Change[] {
 }
 
 /** One side's version of base[start, end), applying its changes inside the range. */
-function applyWithin(baseLines: string[], start: number, end: number, changes: Change[]): string[] {
+function applyWithin(baseLines: readonly string[], start: number, end: number, changes: Change[]): string[] {
   const result: string[] = []
   let index = start
   for (const change of changes) {
@@ -65,15 +79,25 @@ function applyWithin(baseLines: string[], start: number, end: number, changes: C
   return result
 }
 
-function sameLines(a: string[], b: string[]) {
-  return a.length === b.length && a.every((line, index) => line === b[index])
+function sameLines(a: string[], b: string[], lineKey: (line: string) => string) {
+  return a.length === b.length && a.every((line, index) => lineKey(line) === lineKey(b[index]))
+}
+
+export interface ThreeWayMergeOptions {
+  strategy?: MergeConflictStrategy
+  labels?: MergeLabels
+  /**
+   * Comparison key per line. Lines with equal keys count as unchanged, and
+   * where both sides agree by key the THEIRS text is kept.
+   */
+  lineKey?: (line: string) => string
 }
 
 export function threeWayMerge(
   base: string,
   ours: string,
   theirs: string,
-  options: { strategy?: MergeConflictStrategy, labels?: MergeLabels } = {},
+  options: ThreeWayMergeOptions = {},
 ): ThreeWayMergeResult {
   if (ours === theirs) {
     return { text: ours, conflicts: 0 }
@@ -87,9 +111,14 @@ export function threeWayMerge(
 
   const strategy = options.strategy ?? 'markers'
   const labels = options.labels ?? { ours: 'mine', theirs: 'latest' }
-  const baseLines = splitLines(base)
-  const oursChanges = changesFrom(base, ours)
-  const theirsChanges = changesFrom(base, theirs)
+  const lineKey = options.lineKey ?? ((line: string) => line)
+  const rawBaseLines = splitLines(base)
+  // Lines theirs left unchanged (by key) are written in theirs' own text, so
+  // with a formatting-blind key the untouched parts keep theirs' formatting.
+  const theirsText: string[] = []
+  const oursChanges = changesFrom(rawBaseLines, splitLines(ours), lineKey)
+  const theirsChanges = changesFrom(rawBaseLines, splitLines(theirs), lineKey, theirsText)
+  const baseLines = rawBaseLines.map((line, index) => theirsText[index] ?? line)
   const output: string[] = []
   let conflicts = 0
   let baseIndex = 0
@@ -129,9 +158,9 @@ export function threeWayMerge(
     output.push(...baseLines.slice(baseIndex, start))
     const oursVersion = applyWithin(baseLines, start, end, regionOurs)
     const theirsVersion = applyWithin(baseLines, start, end, regionTheirs)
-    if (regionTheirs.length === 0 || sameLines(oursVersion, theirsVersion)) {
+    if (regionTheirs.length === 0) {
       output.push(...oursVersion)
-    } else if (regionOurs.length === 0) {
+    } else if (regionOurs.length === 0 || sameLines(oursVersion, theirsVersion, lineKey)) {
       output.push(...theirsVersion)
     } else {
       conflicts += 1

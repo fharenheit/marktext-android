@@ -93,6 +93,12 @@ interface SourceModeControllerOptions {
    * edits drive: document-state sync, status, autosave scheduling.
    */
   onDocumentEdited: () => void
+  /**
+   * Ran right after the text is handed back to Muya on exit, before the edit
+   * pipeline: the text becomes the formatting baseline, so formatting the
+   * user chose in the source survives later WYSIWYG edits.
+   */
+  onHandedBack?: (text: string) => void
   logger: {
     info(message: string, context?: unknown): void
     warn(message: string, context?: unknown): void
@@ -187,6 +193,7 @@ export function createSourceModeController(
     // One undo boundary; the ENTRY selection is recorded explicitly because
     // the live DOM selection points at the (now unmounting) textarea.
     const changed = editor.replaceContent(nextText, entrySelection ?? null)
+    options.onHandedBack?.(nextText)
 
     if (changed && exitCaret) {
       // The caret coordinates are expressed against the RAW textarea text,

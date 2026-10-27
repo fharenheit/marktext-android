@@ -1,3 +1,4 @@
+import { preserveSourceFormatting, type SourceFormattingBaseline } from './sourceFormatting'
 import { nextTick, ref, type Ref } from 'vue'
 import type { AppScreen } from '../../lib/appExitDecisions'
 import { installAndroidSelectionDiagnostics } from '../../lib/androidSelectionDiagnostics'
@@ -80,6 +81,12 @@ export interface EditorSession {
   getEditor(): MuyaEditor | null
   hasEditor(): boolean
   getEditorMarkdownSnapshot(flushPending?: boolean): string
+  /**
+   * Makes `source` the formatting baseline: later snapshots keep its own
+   * Markdown formatting outside the blocks edited in WYSIWYG. Called when a
+   * text is handed to Muya wholesale (source mode exit).
+   */
+  rebaseSourceFormatting(source: string): void
   syncDocumentFromEditor(markDirty?: boolean, flushPending?: boolean): MarkdownDocumentState
   openEditor(markdown: string): Promise<void>
   retryEditor(): Promise<void>
@@ -109,6 +116,9 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
   const editorReady = ref(false)
   const editorFailed = ref(false)
   let lastOpenedMarkdown = ''
+  // The opened text and Muya's serialization of it: snapshots map WYSIWYG
+  // edits back onto the source instead of re-serializing the whole document.
+  let formattingBaseline: SourceFormattingBaseline | null = null
 
   let editor: MuyaEditor | null = null
   let editorInitToken = 0
@@ -148,10 +158,26 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
       return ''
     }
 
-    return readEditorMarkdownSnapshot(editor, {
-      flushPending,
-      normalizeMarkdown: normalizeEditorMarkdown,
-    })
+    return preserveSourceFormatting(
+      formattingBaseline,
+      readEditorMarkdownSnapshot(editor, {
+        flushPending,
+        normalizeMarkdown: normalizeEditorMarkdown,
+      }),
+    )
+  }
+
+  function rebaseSourceFormatting(source: string) {
+    formattingBaseline = editor
+      ? {
+          source: normalizeEditorMarkdown(source),
+          // Called right after init or replaceContent, which leave no
+          // batched ops pending.
+          canonical: readEditorMarkdownSnapshot(editor, {
+            normalizeMarkdown: normalizeEditorMarkdown,
+          }),
+        }
+      : null
   }
 
   function syncDocumentFromEditor(markDirty = false, flushPending = false) {
@@ -225,6 +251,7 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
       if (token !== editorInitToken) {
         return 'superseded'
       }
+      rebaseSourceFormatting(initialMarkdown)
       options.syncMarkdown('Ready')
       editorFailed.value = false
       editorReady.value = true
@@ -316,6 +343,7 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
     }
     editorInitToken += 1
     editorReady.value = false
+    formattingBaseline = null
     options.clearDraftSaveTimer()
     options.clearAndroidDocumentSaveTimer()
     uninstallEditorSelectionDiagnostics()
@@ -473,6 +501,7 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
     getEditor,
     hasEditor,
     getEditorMarkdownSnapshot,
+    rebaseSourceFormatting,
     syncDocumentFromEditor,
     openEditor,
     destroyEditor,
