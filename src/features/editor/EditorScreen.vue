@@ -200,7 +200,8 @@ const splitActive = computed(() => Boolean(props.splitViewActive) && props.sourc
 const SPLIT_RATIO_STORAGE_KEY = 'marktext.splitView.ratio'
 const SPLIT_RATIO_MIN = 0.15
 const SPLIT_RATIO_MAX = 0.85
-const editorPane = ref<HTMLElement | null>(null)
+// The pane hosting both editors: the WYSIWYG shell's parent.
+const editorPane = computed(() => editorShell.value?.parentElement ?? null)
 const splitDragging = ref(false)
 const splitRatio = ref(readSplitRatio())
 
@@ -671,7 +672,6 @@ onBeforeUnmount(() => {
     </header>
 
     <section
-      ref="editorPane"
       class="editor-pane"
       :class="{ 'editor-pane-split': splitActive }"
       :style="splitActive ? { '--split-ratio': String(splitRatio) } : undefined"
