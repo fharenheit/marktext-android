@@ -2,6 +2,11 @@ name: Android Release
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish a GitHub Release tagged v<package version> at the dispatched commit'
+        type: boolean
+        default: false
   push:
     tags:
       - 'v*.*.*'
@@ -170,8 +175,10 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+      # A pushed v*.*.* tag releases that tag. A manual run with `publish`
+      # creates the v<package version> tag at the dispatched commit itself.
       - name: Create or update GitHub Release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || inputs.publish
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -180,18 +187,25 @@ jobs:
           set -euo pipefail
           apk_path="release-artifacts/${{ steps.artifact.outputs.apk_name }}"
           checksum_path="$apk_path.sha256"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$apk_path" "$checksum_path" --clobber
+          if [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
+            tag="$GITHUB_REF_NAME"
+            target_args=(--verify-tag)
+          else
+            tag="v$APP_VERSION"
+            target_args=(--target "$GITHUB_SHA")
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$apk_path" "$checksum_path" --clobber
           else
             notes=''
             if [[ "$SIGNING_MODE" == 'debug' ]]; then
               notes='This build is signed with a debug key (no release keystore is configured), so it cannot update an install signed with another key.'
             fi
-            gh release create "$GITHUB_REF_NAME" \
+            gh release create "$tag" \
               "$apk_path" \
               "$checksum_path" \
-              --verify-tag \
+              "${target_args[@]}" \
               --generate-notes \
               --notes "$notes" \
-              --title "MarkText for Data Dynamics Inc $GITHUB_REF_NAME"
+              --title "MarkText for Data Dynamics Inc $tag"
           fi
