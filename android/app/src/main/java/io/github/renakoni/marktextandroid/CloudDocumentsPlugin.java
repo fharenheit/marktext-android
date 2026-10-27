@@ -682,7 +682,9 @@ public class CloudDocumentsPlugin extends Plugin {
                     pathHint = location.describe();
                     // Scope the image endpoint before the editor renders;
                     // the web layer's own context call can arrive after the
-                    // first image requests.
+                    // first image requests. A fresh open also refetches the
+                    // branch's images, which may have changed on GitHub.
+                    githubImageServer.invalidate(location);
                     githubImageServer.setContext(location);
                 } else if (auth == googleDriveAuth) {
                     GoogleDriveClient.FileContent file = driveClient.readFile(
@@ -858,9 +860,11 @@ public class CloudDocumentsPlugin extends Plugin {
                     String message = commitMessage.length() > 0 ? commitMessage : "Update " + location.path;
                     List<GitHubClient.FileChange> images = readLocalImagesForCommit(localImages);
                     GitHubClient.Location target = location;
+                    String baseSha = null;
                     if (newBranch.length() > 0) {
                         String headSha = githubClient.getBranchHead(
                             tokens.accessToken, location.owner, location.repo, location.ref);
+                        baseSha = headSha;
                         githubClient.createBranch(
                             tokens.accessToken, location.owner, location.repo, newBranch, headSha);
                         target = new GitHubClient.Location(location.owner, location.repo, newBranch, location.path);
@@ -872,11 +876,11 @@ public class CloudDocumentsPlugin extends Plugin {
                             : githubClient.commitFiles(tokens.accessToken, target, bytes, eTag, images, message);
                     } catch (CloudProviderException | IOException ex) {
                         if (target != location) {
-                            githubClient.deleteBranch(
-                                tokens.accessToken, location.owner, location.repo, newBranch);
+                            removeUnusedBranch(tokens.accessToken, location, newBranch, baseSha);
                         }
                         throw ex;
                     }
+                    githubImageServer.invalidate(target);
                     if (target != location && openPullRequest) {
                         // The commit already landed on the new branch; a
                         // failed pull request must not report it as lost.
@@ -938,6 +942,27 @@ public class CloudDocumentsPlugin extends Plugin {
                 call.reject("Could not reach " + auth.label, "CLOUD_NETWORK_FAILED", ex);
             }
         });
+    }
+
+    /**
+     * Rolls back a branch created for a commit that failed — but only while
+     * it still points at the commit it was created from. A lost response
+     * (timeout, dropped connection, gateway error) can hide a commit that
+     * did land; a branch that moved, or whose head cannot be read, is kept.
+     */
+    private void removeUnusedBranch(String accessToken, GitHubClient.Location location, String branch, String baseSha) {
+        String head;
+        try {
+            head = githubClient.getBranchHead(accessToken, location.owner, location.repo, branch);
+        } catch (CloudProviderException | IOException ex) {
+            Log.w(TAG, "Kept the new GitHub branch; its head could not be read: " + ex.getMessage());
+            return;
+        }
+        if (head.equals(baseSha)) {
+            githubClient.deleteBranch(accessToken, location.owner, location.repo, branch);
+        } else {
+            Log.w(TAG, "Kept the new GitHub branch; it moved past its base commit");
+        }
     }
 
     private ProviderAuth providerAuthFor(String provider) {

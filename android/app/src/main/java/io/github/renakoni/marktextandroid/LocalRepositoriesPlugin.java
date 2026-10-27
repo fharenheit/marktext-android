@@ -14,11 +14,15 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import org.eclipse.jgit.diff.RawText;
 import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
@@ -29,8 +33,14 @@ import org.json.JSONObject;
  * pull with conflict resolution, branches, history, diffs, reverts). The
  * Git semantics live in the pure-JVM {@link LocalGitRepository}; this
  * plugin owns storage (app-private files/repositories/<id>), credentials
- * (the GitHub sign-in token over HTTPS), threading (one Git operation at a
- * time) and the bridge shapes.
+ * (the GitHub sign-in token over HTTPS), threading and the bridge shapes.
+ *
+ * Threading: Git operations run one at a time on their own queue; file
+ * reads, saves and status run on a second queue so autosave never waits on
+ * a clone, push or pull. A per-repository working-tree lock keeps the two
+ * apart: file operations and local Git operations hold it throughout,
+ * push and pull only around the steps that touch the working tree or
+ * index (never during network transfer).
  *
  * Documents inside a working copy are read and written here as ordinary
  * files, so editing autosaves to the working tree and only an explicit
@@ -49,6 +59,10 @@ public class LocalRepositoriesPlugin extends Plugin {
     private static final int MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
     private final ExecutorService gitExecutor = Executors.newSingleThreadExecutor();
+    /** Working-tree reads/writes and status: never queued behind network Git operations. */
+    private final ExecutorService fileExecutor = Executors.newSingleThreadExecutor();
+    /** Per repository id; see the class comment. */
+    private final ConcurrentHashMap<String, ReentrantLock> workTreeLocks = new ConcurrentHashMap<>();
     private final CharsetSniffer charsetSniffer = new IcuCharsetSniffer();
 
     /** One Git operation; the plugin maps its failures onto the call. */
@@ -64,7 +78,7 @@ public class LocalRepositoriesPlugin extends Plugin {
 
     @PluginMethod
     public void listRepositories(PluginCall call) {
-        run(call, () -> {
+        run(call, gitExecutor, () -> {
             JSArray values = new JSArray();
             File[] directories = repositoriesDirectory().listFiles();
             if (directories != null) {
@@ -75,10 +89,14 @@ public class LocalRepositoriesPlugin extends Plugin {
                     if (!new File(directory, ".git").isDirectory()) {
                         continue;
                     }
+                    Lock lock = workTreeLock(directory.getName());
+                    lock.lock();
                     try (LocalGitRepository repository = LocalGitRepository.open(directory)) {
                         values.put(describe(directory.getName(), repository));
                     } catch (LocalRepositoryException ex) {
                         Log.w(TAG, "Skipped an unreadable repository: " + directory.getName());
+                    } finally {
+                        lock.unlock();
                     }
                 }
             }
@@ -122,7 +140,7 @@ public class LocalRepositoriesPlugin extends Plugin {
             return;
         }
         String name = requestedName.length() > 0 ? requestedName : nameFromUrl(url);
-        run(call, () -> {
+        run(call, gitExecutor, () -> {
             String id = uniqueId(name);
             File directory = new File(repositoriesDirectory(), id);
             Log.i(TAG, "Cloning repository " + id);
@@ -169,23 +187,26 @@ public class LocalRepositoriesPlugin extends Plugin {
     @PluginMethod
     public void deleteRepository(PluginCall call) {
         String id = call.getString("id", "");
-        run(call, () -> {
-            File directory = repositoryDirectory(id);
-            LocalGitRepository.deleteRecursively(directory);
-            Log.i(TAG, "Deleted repository " + id);
-            return new JSObject();
+        run(call, gitExecutor, () -> {
+            requireValidId(id);
+            return locked(workTreeLock(id), () -> {
+                File directory = repositoryDirectory(id);
+                LocalGitRepository.deleteRecursively(directory);
+                Log.i(TAG, "Deleted repository " + id);
+                return new JSObject();
+            });
         });
     }
 
     @PluginMethod
     public void getRepositoryStatus(PluginCall call) {
-        withRepository(call, repository -> statusJson(repository.status()));
+        withRepositoryFiles(call, repository -> statusJson(repository.status()));
     }
 
     @PluginMethod
     public void listRepositoryFolder(PluginCall call) {
         String path = call.getString("path", "");
-        withRepository(call, repository -> {
+        withRepositoryFiles(call, repository -> {
             JSArray values = new JSArray();
             for (LocalGitRepository.Entry entry : repository.listFolder(path)) {
                 JSObject value = new JSObject();
@@ -207,7 +228,7 @@ public class LocalRepositoriesPlugin extends Plugin {
         String path = call.getString("path", "");
         String defaultEncoding = MarkdownCodec.normalizeEncoding(call.getString("defaultEncoding", "utf8"));
         boolean autoDetectEncoding = call.getBoolean("autoDetectEncoding", true);
-        withRepository(call, repository -> {
+        withRepositoryFiles(call, repository -> {
             byte[] bytes = repository.readFile(path, MarkdownCodec.MAX_MARKDOWN_BYTES);
             DecodedMarkdown decoded = MarkdownCodec.decode(bytes, defaultEncoding, autoDetectEncoding, charsetSniffer);
             JSObject result = new JSObject();
@@ -239,7 +260,7 @@ public class LocalRepositoriesPlugin extends Plugin {
             call.reject("Markdown content is required", "INVALID_MARKDOWN");
             return;
         }
-        withRepository(call, repository -> {
+        withRepositoryFiles(call, repository -> {
             byte[] bytes = MarkdownCodec.validateBytes(markdown, new MarkdownWriteOptions(encoding, writeBom));
             copyLocalImages(repository, localImages);
             repository.writeFile(path, bytes);
@@ -254,7 +275,7 @@ public class LocalRepositoriesPlugin extends Plugin {
     @PluginMethod
     public void getRepositoryFileDiff(PluginCall call) {
         String path = call.getString("path", "");
-        withRepository(call, repository -> {
+        withRepositoryFiles(call, repository -> {
             byte[] committed = repository.readCommittedFile(path);
             File file = repository.resolve(path);
             byte[] current = file.isFile() && file.length() <= LocalGitRepository.MAX_DIFF_BYTES
@@ -284,25 +305,28 @@ public class LocalRepositoriesPlugin extends Plugin {
     @PluginMethod
     public void pushRepository(PluginCall call) {
         String id = call.getString("id", "");
-        withRepository(call, repository -> {
+        withRepositoryNetwork(call, (repository, workTreeLock) -> {
+            // A push reads commits and refs only, never the working tree.
             repository.push(
                 credentialsFor(repository.getRemoteUrl()),
                 (task, completed, total) -> emitProgress(id, task, completed, total)
             );
-            return statusJson(repository.status());
+            return locked(workTreeLock, () -> statusJson(repository.status()));
         });
     }
 
     @PluginMethod
     public void pullRepository(PluginCall call) {
         String id = call.getString("id", "");
-        withRepository(call, repository -> {
+        withRepositoryNetwork(call, (repository, workTreeLock) -> {
             applyIdentity(repository);
+            // The fetch runs unlocked; pull takes the lock for the merge.
             LocalGitRepository.PullOutcome outcome = repository.pull(
                 credentialsFor(repository.getRemoteUrl()),
-                (task, completed, total) -> emitProgress(id, task, completed, total)
+                (task, completed, total) -> emitProgress(id, task, completed, total),
+                workTreeLock
             );
-            return outcomeJson(outcome, repository);
+            return locked(workTreeLock, () -> outcomeJson(outcome, repository));
         });
     }
 
@@ -440,17 +464,62 @@ public class LocalRepositoriesPlugin extends Plugin {
         JSObject run(LocalGitRepository repository) throws LocalRepositoryException, DocumentReadException, IOException;
     }
 
+    /** A push or pull: takes the working-tree lock itself, only around local steps. */
+    private interface NetworkTask {
+        JSObject run(LocalGitRepository repository, Lock workTreeLock)
+            throws LocalRepositoryException, DocumentReadException, IOException;
+    }
+
+    /** A local Git operation: on the Git queue, holding the working tree throughout. */
     private void withRepository(PluginCall call, RepositoryTask task) {
+        withLockedRepository(call, gitExecutor, task);
+    }
+
+    /** A file read/write or status: on the file queue, holding the working tree throughout. */
+    private void withRepositoryFiles(PluginCall call, RepositoryTask task) {
+        withLockedRepository(call, fileExecutor, task);
+    }
+
+    private void withLockedRepository(PluginCall call, ExecutorService executor, RepositoryTask task) {
         String id = call.getString("id", "");
-        run(call, () -> {
+        run(call, executor, () -> {
+            requireValidId(id);
+            // Locked before the directory check, so a delete that ran while
+            // waiting is seen rather than a deleted folder being recreated.
+            return locked(workTreeLock(id), () -> {
+                try (LocalGitRepository repository = LocalGitRepository.open(repositoryDirectory(id))) {
+                    return task.run(repository);
+                }
+            });
+        });
+    }
+
+    private void withRepositoryNetwork(PluginCall call, NetworkTask task) {
+        String id = call.getString("id", "");
+        run(call, gitExecutor, () -> {
+            requireValidId(id);
             try (LocalGitRepository repository = LocalGitRepository.open(repositoryDirectory(id))) {
-                return task.run(repository);
+                return task.run(repository, workTreeLock(id));
             }
         });
     }
 
-    private void run(PluginCall call, GitTask task) {
-        gitExecutor.execute(() -> {
+    private Lock workTreeLock(String id) {
+        return workTreeLocks.computeIfAbsent(id, key -> new ReentrantLock());
+    }
+
+    private static JSObject locked(Lock lock, GitTask task)
+        throws LocalRepositoryException, DocumentReadException, IOException {
+        lock.lock();
+        try {
+            return task.run();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void run(PluginCall call, ExecutorService executor, GitTask task) {
+        executor.execute(() -> {
             try {
                 call.resolve(task.run());
             } catch (LocalRepositoryException ex) {
@@ -478,10 +547,14 @@ public class LocalRepositoriesPlugin extends Plugin {
         return directory;
     }
 
-    private File repositoryDirectory(String id) throws LocalRepositoryException {
+    private static void requireValidId(String id) throws LocalRepositoryException {
         if (!isValidId(id)) {
             throw new LocalRepositoryException("REPOSITORY_NOT_FOUND", "This repository is not on the device anymore");
         }
+    }
+
+    private File repositoryDirectory(String id) throws LocalRepositoryException {
+        requireValidId(id);
         File directory = new File(repositoriesDirectory(), id);
         if (!new File(directory, ".git").isDirectory()) {
             throw new LocalRepositoryException("REPOSITORY_NOT_FOUND", "This repository is not on the device anymore");
@@ -618,10 +691,12 @@ public class LocalRepositoriesPlugin extends Plugin {
                 throw new LocalRepositoryException("IMAGE_TOO_LARGE", "An image in this document is larger than 15 MB");
             }
             File target = repository.resolve(path);
-            if (target.isFile() && target.length() == source.length()) {
+            byte[] bytes = Files.readAllBytes(source.toPath());
+            if (target.isFile() && target.length() == bytes.length
+                && Arrays.equals(Files.readAllBytes(target.toPath()), bytes)) {
                 continue;
             }
-            repository.writeFile(path, Files.readAllBytes(source.toPath()));
+            repository.writeFile(path, bytes);
         }
     }
 

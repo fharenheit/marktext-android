@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Auto Backup up to Android 11 (API 30); see data_extraction_rules.xml
+     for API 31+. Sign-in tokens (cloud_documents: OneDrive, Google Drive,
+     GitHub) and remembered Git passwords (git_credentials) never leave the
+     device, and the Git working copies are left out: they can be cloned
+     again and would overrun the backup quota. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="cloud_documents.xml" />
+    <exclude domain="sharedpref" path="git_credentials.xml" />
+    <exclude domain="file" path="repositories/" />
+</full-backup-content>

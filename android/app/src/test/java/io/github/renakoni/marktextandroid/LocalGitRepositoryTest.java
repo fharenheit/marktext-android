@@ -443,4 +443,197 @@ public class LocalGitRepositoryTest {
             assertFailsWith("DOCUMENT_NOT_FOUND", () -> phone.readFile("missing.md", 64));
         }
     }
+
+    @Test
+    public void writeTemporariesStayOutOfTheWorkingTree() throws Exception {
+        try (LocalGitRepository phone = cloneDevice(createRemote(), "phone")) {
+            phone.writeFile("README.md", bytes("saved"));
+            phone.writeFile("docs/guide.md", bytes("saved too"));
+            for (File file : phone.getWorkTree().listFiles()) {
+                assertFalse(file.getName(), file.getName().endsWith(".tmp"));
+            }
+            phone.commitAll("Saves");
+            assertTrue(phone.status().changes.isEmpty());
+            assertEquals(2, phone.commitDiff(phone.log(1, 0).get(0).sha).size());
+        }
+    }
+
+    @Test
+    public void deletingNeverFollowsSymbolicLinks() throws Exception {
+        File outside = temporary.newFolder("app-data");
+        File precious = new File(outside, "precious.txt");
+        Files.write(precious.toPath(), bytes("keep"));
+        File repository = temporary.newFolder("doomed");
+        new File(repository, "sub").mkdirs();
+        Files.createSymbolicLink(new File(repository, "up").toPath(), outside.toPath());
+        Files.createSymbolicLink(new File(repository, "sub/parent").toPath(), new File("..").toPath());
+        Files.write(new File(repository, "sub/file.md").toPath(), bytes("x"));
+
+        LocalGitRepository.deleteRecursively(repository);
+
+        assertFalse(repository.exists());
+        assertTrue(precious.isFile());
+        assertEquals("keep", text(Files.readAllBytes(precious.toPath())));
+    }
+
+    @Test
+    public void clonedSymbolicLinksAreCheckedOutAsPlainFiles() throws Exception {
+        File bare = temporary.newFolder("links.git");
+        Git.init().setBare(true).setInitialBranch("main").setDirectory(bare).call().close();
+        File seed = temporary.newFolder("link-seed");
+        try (Git git = Git.cloneRepository().setURI(bare.toURI().toString()).setDirectory(seed).call()) {
+            // The seed is a plain JGit clone: real links get committed.
+            git.getRepository().getConfig().setBoolean("core", null, "symlinks", true);
+            git.getRepository().getConfig().save();
+            Files.write(new File(seed, "README.md").toPath(), bytes("# Hello\n"));
+            Files.createSymbolicLink(new File(seed, "escape").toPath(), new File("..").toPath());
+            git.add().addFilepattern(".").call();
+            assertEquals(org.eclipse.jgit.lib.FileMode.SYMLINK,
+                git.getRepository().readDirCache().getEntry("escape").getFileMode());
+            git.commit().setMessage("Links").setAuthor("Seed", "seed@example.com")
+                .setCommitter("Seed", "seed@example.com").call();
+            git.push().setRefSpecs(new org.eclipse.jgit.transport.RefSpec("HEAD:refs/heads/main")).call();
+        }
+
+        try (LocalGitRepository phone = cloneDevice(bare.toURI().toString(), "phone")) {
+            File escape = new File(phone.getWorkTree(), "escape");
+            assertFalse(Files.isSymbolicLink(escape.toPath()));
+            assertEquals("..", text(Files.readAllBytes(escape.toPath())));
+            assertTrue(phone.status().changes.isEmpty());
+        }
+    }
+
+    @Test
+    public void abortingAMergeKeepsUnrelatedUncommittedEdits() throws Exception {
+        String remote = createRemote();
+        try (LocalGitRepository phone = cloneDevice(remote, "phone");
+             LocalGitRepository laptop = cloneDevice(remote, "laptop")) {
+            laptop.writeFile("README.md", bytes("laptop"));
+            laptop.writeFile("laptop-only.md", bytes("new on laptop"));
+            laptop.commitAll("Laptop");
+            laptop.push(null, null);
+            phone.writeFile("README.md", bytes("phone"));
+            phone.commitAll("Phone");
+            phone.writeFile("docs/guide.md", bytes("unsaved guide edit"));
+            phone.writeFile("draft.md", bytes("untracked draft"));
+
+            assertEquals("conflicts", phone.pull(null, null).result);
+            assertTrue(new File(phone.getWorkTree(), "laptop-only.md").exists());
+            phone.abortMerge();
+
+            assertEquals("SAFE", phone.status().state);
+            assertEquals("phone", text(phone.readFile("README.md", 64)));
+            assertFalse(new File(phone.getWorkTree(), "laptop-only.md").exists());
+            assertEquals("unsaved guide edit", text(phone.readFile("docs/guide.md", 64)));
+            assertEquals("untracked draft", text(phone.readFile("draft.md", 64)));
+            List<LocalGitRepository.FileChange> changes = phone.status().changes;
+            assertEquals(2, changes.size());
+            assertEquals("modified", changes.get(indexOf(changes, "docs/guide.md")).kind);
+            assertEquals("added", changes.get(indexOf(changes, "draft.md")).kind);
+        }
+    }
+
+    @Test
+    public void completingAMergeLeavesUnrelatedEditsUncommitted() throws Exception {
+        String remote = createRemote();
+        try (LocalGitRepository phone = cloneDevice(remote, "phone");
+             LocalGitRepository laptop = cloneDevice(remote, "laptop")) {
+            laptop.writeFile("README.md", bytes("laptop"));
+            laptop.commitAll("Laptop");
+            laptop.push(null, null);
+            phone.writeFile("README.md", bytes("phone"));
+            phone.commitAll("Phone");
+            phone.writeFile("docs/guide.md", bytes("unsaved guide edit"));
+            phone.writeFile("draft.md", bytes("untracked draft"));
+
+            assertEquals("conflicts", phone.pull(null, null).result);
+            phone.resolveConflict("README.md", "theirs");
+            LocalGitRepository.CommitInfo merge = phone.completeMerge(null);
+
+            assertEquals(2, merge.parentCount);
+            List<LocalGitRepository.FileDiff> merged = phone.commitDiff(merge.sha);
+            assertEquals(1, merged.size());
+            assertEquals("README.md", merged.get(0).newPath);
+            List<LocalGitRepository.FileChange> changes = phone.status().changes;
+            assertEquals(2, changes.size());
+            assertEquals("unsaved guide edit", text(phone.readFile("docs/guide.md", 64)));
+        }
+    }
+
+    @Test
+    public void abortingARevertKeepsUnrelatedUncommittedEdits() throws Exception {
+        try (LocalGitRepository phone = cloneDevice(createRemote(), "phone")) {
+            phone.writeFile("README.md", bytes("one"));
+            phone.commitAll("One");
+            String first = phone.log(1, 0).get(0).sha;
+            phone.writeFile("README.md", bytes("two"));
+            phone.commitAll("Two");
+            phone.writeFile("docs/guide.md", bytes("unsaved guide edit"));
+
+            assertEquals("conflicts", phone.revertCommit(first).result);
+            phone.abortMerge();
+
+            assertEquals("SAFE", phone.status().state);
+            assertEquals("two", text(phone.readFile("README.md", 64)));
+            assertEquals("unsaved guide edit", text(phone.readFile("docs/guide.md", 64)));
+            assertEquals(1, phone.status().changes.size());
+        }
+    }
+
+    @Test
+    public void pullHoldsTheWorkTreeLockOnlyForTheMerge() throws Exception {
+        String remote = createRemote();
+        try (LocalGitRepository phone = cloneDevice(remote, "phone");
+             LocalGitRepository laptop = cloneDevice(remote, "laptop")) {
+            laptop.writeFile("README.md", bytes("laptop"));
+            laptop.commitAll("Laptop");
+            laptop.push(null, null);
+
+            java.util.concurrent.locks.ReentrantLock lock = new java.util.concurrent.locks.ReentrantLock();
+            List<Boolean> lockedDuringFetch = new ArrayList<>();
+            LocalGitRepository.PullOutcome outcome = phone.pull(
+                null,
+                (task, completed, total) -> lockedDuringFetch.add(lock.isHeldByCurrentThread()),
+                lock
+            );
+            assertEquals("fast-forward", outcome.result);
+            assertEquals("laptop", text(phone.readFile("README.md", 64)));
+            assertFalse(lock.isLocked());
+            assertFalse(lockedDuringFetch.isEmpty());
+            assertFalse(lockedDuringFetch.get(0));
+        }
+    }
+
+    @Test
+    public void transportFailuresMapToAccurateCodes() {
+        String github = "https://github.com/o/r.git";
+        String other = "https://git.example.com/o/r.git";
+        assertEquals("AUTH_FAILED", translated("https://github.com/o/r.git: not authorized", null, github).code);
+        assertTrue(translated("x: not authorized", null, github).getMessage().contains("GitHub"));
+        LocalRepositoryException otherAuth = translated("x: not authorized", null, other);
+        assertEquals("AUTH_FAILED", otherAuth.code);
+        assertFalse(otherAuth.getMessage().contains("GitHub"));
+        assertEquals("AUTH_REQUIRED", translated(
+            "x: Authentication is required but no CredentialsProvider has been registered", null, other).code);
+        assertEquals("REMOTE_ACCESS_DENIED", translated(
+            "https://github.com/o/r.git: git-receive-pack not permitted on 'https://github.com/o/r.git/'",
+            null, github).code);
+        assertEquals("NETWORK_FAILED",
+            translated("x: cannot open git-upload-pack", new java.net.UnknownHostException("h"), other).code);
+        LocalRepositoryException timeout =
+            translated("x: cannot open git-upload-pack", new java.net.SocketTimeoutException("t"), other);
+        assertEquals("NETWORK_FAILED", timeout.code);
+        assertEquals("The remote did not respond in time", timeout.getMessage());
+        LocalRepositoryException refused =
+            translated("https://tok@git.example.com/o/r.git: pre-receive hook declined", null, other);
+        assertEquals("TRANSPORT_FAILED", refused.code);
+        assertEquals("pre-receive hook declined", refused.getMessage());
+        assertEquals("remote https://git.example.com/x hung up",
+            LocalGitRepository.transportReason("remote https://user:secret@git.example.com/x hung up"));
+    }
+
+    private static LocalRepositoryException translated(String message, Throwable cause, String url) {
+        return LocalGitRepository.translate(
+            new org.eclipse.jgit.api.errors.TransportException(message, cause), "PUSH_FAILED", "The push failed", url);
+    }
 }

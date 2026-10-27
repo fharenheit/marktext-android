@@ -59,9 +59,18 @@ final class SandboxedGitSystemReader extends SystemReader {
         return new FileBasedConfig(parent, new File(configDirectory, "user.gitconfig"), fs);
     }
 
+    /**
+     * The system level also carries the app's defaults, which a repository's
+     * own config may still override: core.symlinks=false checks symbolic
+     * links out as small text files holding the target, so a cloned
+     * {@code x -> ../..} can never lead file operations out of the
+     * working tree.
+     */
     @Override
     public FileBasedConfig openSystemConfig(Config parent, FS fs) {
-        return new FileBasedConfig(parent, new File(configDirectory, "system.gitconfig"), fs);
+        Config defaults = new Config(parent);
+        defaults.setBoolean("core", null, "symlinks", false);
+        return new FileBasedConfig(defaults, new File(configDirectory, "system.gitconfig"), fs);
     }
 
     @Override

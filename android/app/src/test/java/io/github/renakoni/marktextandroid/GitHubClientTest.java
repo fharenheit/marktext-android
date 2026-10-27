@@ -459,7 +459,45 @@ public class GitHubClientTest {
         assertFailsWith("CLOUD_AUTH_EXPIRED", () -> client.list("T", root));
         assertFailsWith("CLOUD_DOCUMENT_NOT_FOUND", () -> client.list("T", root));
         assertFailsWith("CLOUD_UNAVAILABLE", () -> client.list("T", root));
-        assertFailsWith("CLOUD_DOCUMENT_NOT_FOUND", () -> client.list("T", root));
+        assertFailsWith("CLOUD_ACCESS_DENIED", () -> client.list("T", root));
+    }
+
+    @Test
+    public void forbiddenResponsesSaySsoScopeOrSecondaryRateLimit() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        Map<String, String> sso = new LinkedHashMap<>();
+        sso.put("X-GitHub-SSO", "required; url=https://github.com/orgs/acme/sso?authorization_request=1");
+        transport.enqueue(403, sso, "{\"message\":\"Resource protected by organization SAML enforcement.\"}");
+        Map<String, String> scopes = new LinkedHashMap<>();
+        scopes.put("X-OAuth-Scopes", "read:user");
+        scopes.put("X-Accepted-OAuth-Scopes", "repo");
+        transport.enqueue(403, scopes, "{\"message\":\"Must have admin rights to Repository.\"}");
+        transport.enqueue(403, "{\"message\":\"Resource not accessible by personal access token\"}");
+        Map<String, String> retry = new LinkedHashMap<>();
+        retry.put("Retry-After", "60");
+        transport.enqueue(403, retry, "{\"message\":\"You have exceeded a secondary rate limit.\"}");
+        GitHubClient client = new GitHubClient(transport);
+        GitHubClient.Location root = GitHubClient.Location.root();
+
+        assertFailsWith("CLOUD_SSO_REQUIRED", () -> client.list("T", root));
+        try {
+            client.list("T", root);
+            fail("Expected CLOUD_ACCESS_DENIED");
+        } catch (CloudProviderException ex) {
+            assertEquals("CLOUD_ACCESS_DENIED", ex.code);
+            assertTrue(ex.getMessage().contains("\"repo\""));
+        }
+        try {
+            client.list("T", root);
+            fail("Expected CLOUD_ACCESS_DENIED");
+        } catch (CloudProviderException ex) {
+            assertEquals("CLOUD_ACCESS_DENIED", ex.code);
+            assertEquals(
+                "GitHub denied access to this repository: Resource not accessible by personal access token",
+                ex.getMessage()
+            );
+        }
+        assertFailsWith("CLOUD_UNAVAILABLE", () -> client.list("T", root));
     }
 
     @Test
@@ -592,6 +630,33 @@ public class GitHubClientTest {
     }
 
     @Test
+    public void multiFileCommitRefRefusalsOtherThanFastForwardAreRejections() throws Exception {
+        String[][] refusals = {
+            {"422", "{\"message\":\"Repository rule violations found\\n\\nCannot update this protected ref.\"}"},
+            {"409", "{\"message\":\"Git Repository is empty.\"}"},
+        };
+        for (String[] refusal : refusals) {
+            FakeTransport transport = new FakeTransport();
+            transport.enqueue(200, "{\"object\":{\"sha\":\"head1\"}}");
+            transport.enqueue(200, "{\"type\":\"file\",\"sha\":\"doc-old\"}");
+            transport.enqueue(200, "{\"sha\":\"head1\",\"tree\":{\"sha\":\"tree1\"}}");
+            transport.enqueue(201, "{\"sha\":\"blob-doc\"}");
+            transport.enqueue(201, "{\"sha\":\"tree2\"}");
+            transport.enqueue(201, "{\"sha\":\"commit2\"}");
+            transport.enqueue(Integer.parseInt(refusal[0]), refusal[1]);
+            try {
+                new GitHubClient(transport).commitFiles(
+                    "T", GitHubClient.Location.parse("o/r/main/a.md"), new byte[0], "doc-old",
+                    java.util.Collections.emptyList(), "m");
+                fail("Expected CLOUD_WRITE_REJECTED");
+            } catch (CloudProviderException ex) {
+                assertEquals("CLOUD_WRITE_REJECTED", ex.code);
+                assertTrue(ex.getMessage().startsWith("GitHub rejected the commit: "));
+            }
+        }
+    }
+
+    @Test
     public void multiFileCommitsValidateExtraPaths() throws Exception {
         FakeTransport transport = new FakeTransport();
 
@@ -616,6 +681,23 @@ public class GitHubClientTest {
 
         assertFailsWith("CLOUD_NAME_EXISTS", () -> client.createBranch("T", "o", "r", "marktext/fix", "head1"));
         assertFailsWith("INVALID_BRANCH_NAME", () -> client.createBranch("T", "o", "r", "bad..name", "head1"));
+    }
+
+    @Test
+    public void branchCreationRefusalsOtherThanAnExistingNameAreRejections() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.enqueue(422, "{\"message\":\"Object does not exist\"}");
+        transport.enqueue(422, "{\"message\":\"Repository rule violations found\\n\\nCannot create ref due to creations being restricted.\"}");
+        GitHubClient client = new GitHubClient(transport);
+
+        assertFailsWith("CLOUD_WRITE_REJECTED", () -> client.createBranch("T", "o", "r", "marktext/fix", "gone"));
+        try {
+            client.createBranch("T", "o", "r", "marktext/fix", "head1");
+            fail("Expected CLOUD_WRITE_REJECTED");
+        } catch (CloudProviderException ex) {
+            assertEquals("CLOUD_WRITE_REJECTED", ex.code);
+            assertEquals("GitHub rejected the commit: Repository rule violations found", ex.getMessage());
+        }
     }
 
     @Test

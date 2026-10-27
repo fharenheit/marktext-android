@@ -17,6 +17,10 @@ import java.util.Map;
  * Only the repository and branch of the document currently open (the
  * context the web layer sets) are served, so a Markdown file cannot use the
  * endpoint to pull files from other repositories the account can read.
+ *
+ * The cache is keyed by branch name, which moves: a branch's entries are
+ * dropped whenever its document is (re)opened or committed to, and when
+ * the context switches to another branch.
  */
 final class GitHubImageServer {
 
@@ -53,6 +57,8 @@ final class GitHubImageServer {
     private final Object lock = new Object();
     private GitHubClient.Location context;
     private int cachedBytes = 0;
+    /** Bumped by every invalidation; a fetch that straddles one is not cached. */
+    private long generation = 0;
     /** Access-ordered LRU, bounded by total bytes rather than entries. */
     private final LinkedHashMap<String, byte[]> cache = new LinkedHashMap<>(16, 0.75f, true);
 
@@ -64,7 +70,20 @@ final class GitHubImageServer {
     /** The open document's location, or null when no GitHub document is open. */
     void setContext(GitHubClient.Location documentLocation) {
         synchronized (lock) {
+            if (context != null && !sameBranch(context, documentLocation)) {
+                dropBranch(context);
+            }
             context = documentLocation;
+        }
+    }
+
+    /**
+     * Drops cached images of the location's repository and branch, after it
+     * was committed to or its document was read afresh.
+     */
+    void invalidate(GitHubClient.Location branch) {
+        synchronized (lock) {
+            dropBranch(branch);
         }
     }
 
@@ -74,6 +93,7 @@ final class GitHubImageServer {
             context = null;
             cache.clear();
             cachedBytes = 0;
+            generation++;
         }
     }
 
@@ -98,6 +118,7 @@ final class GitHubImageServer {
         }
 
         String key = location.serialize();
+        long fetchGeneration;
         synchronized (lock) {
             if (!isInContext(location)) {
                 return error(403, "Forbidden");
@@ -106,29 +127,60 @@ final class GitHubImageServer {
             if (cached != null) {
                 return new Response(200, "OK", mimeType, cached);
             }
+            fetchGeneration = generation;
         }
 
         byte[] bytes;
         try {
             bytes = client.readRaw(tokens.accessToken(), location, MAX_IMAGE_BYTES);
         } catch (CloudProviderException ex) {
-            return "CLOUD_DOCUMENT_NOT_FOUND".equals(ex.code) ? error(404, "Not Found") : error(502, "Bad Gateway");
+            if ("CLOUD_DOCUMENT_NOT_FOUND".equals(ex.code)) {
+                return error(404, "Not Found");
+            }
+            if ("CLOUD_ACCESS_DENIED".equals(ex.code) || "CLOUD_SSO_REQUIRED".equals(ex.code)) {
+                return error(403, "Forbidden");
+            }
+            return error(502, "Bad Gateway");
         } catch (IOException ex) {
             return error(502, "Bad Gateway");
         }
 
         synchronized (lock) {
-            remember(key, bytes);
+            if (fetchGeneration == generation) {
+                remember(key, bytes);
+            }
         }
         return new Response(200, "OK", mimeType, bytes);
     }
 
     private boolean isInContext(GitHubClient.Location location) {
-        return context != null
-            && context.ref != null
-            && context.owner.equalsIgnoreCase(location.owner)
-            && context.repo.equalsIgnoreCase(location.repo)
-            && context.ref.equals(location.ref);
+        return context != null && context.ref != null && sameBranch(context, location);
+    }
+
+    private static boolean sameBranch(GitHubClient.Location left, GitHubClient.Location right) {
+        return right != null
+            && left.owner.equalsIgnoreCase(right.owner)
+            && left.repo.equalsIgnoreCase(right.repo)
+            && left.ref != null
+            && left.ref.equals(right.ref);
+    }
+
+    private void dropBranch(GitHubClient.Location branch) {
+        generation++;
+        Iterator<Map.Entry<String, byte[]>> entries = cache.entrySet().iterator();
+        while (entries.hasNext()) {
+            Map.Entry<String, byte[]> entry = entries.next();
+            GitHubClient.Location cached;
+            try {
+                cached = GitHubClient.Location.parse(entry.getKey());
+            } catch (CloudProviderException ex) {
+                cached = null;
+            }
+            if (cached == null || sameBranch(branch, cached)) {
+                cachedBytes -= entry.getValue().length;
+                entries.remove();
+            }
+        }
     }
 
     private void remember(String key, byte[] bytes) {

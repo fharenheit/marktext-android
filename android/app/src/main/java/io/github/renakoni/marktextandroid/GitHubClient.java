@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -719,7 +720,8 @@ final class GitHubClient {
      * branch head, a commit, and a non-forced ref update. The document's
      * blob at the head must still be the one it was read at, and the ref
      * update refuses to move if the branch advanced meanwhile — either way
-     * the result is CLOUD_DOCUMENT_CONFLICT rather than lost work.
+     * the result is CLOUD_DOCUMENT_CONFLICT rather than lost work. Other
+     * ref-update refusals (rules, protection) are CLOUD_WRITE_REJECTED.
      */
     CommitResult commitFiles(
         String accessToken,
@@ -784,15 +786,17 @@ final class GitHubClient {
             refUpdate.put("sha", commitSha);
             refUpdate.put("force", false);
             HttpTransport.Response moved = send(accessToken, "PATCH", refUrl(repoUrl, document.ref), refUpdate);
-            if (moved.status == 422 || moved.status == 409) {
-                // Not a fast-forward: someone pushed to the branch meanwhile.
-                throw new CloudProviderException(
-                    "CLOUD_DOCUMENT_CONFLICT",
-                    "This branch changed on GitHub while committing; reopen the document and try again"
-                );
-            }
             if (moved.status != 200) {
-                throw commitException(moved, parseJson(moved.body));
+                JSONObject refused = parseJson(moved.body);
+                String detail = refused == null ? "" : refused.optString("message", "").toLowerCase(Locale.US);
+                if (moved.status == 422 && (detail.contains("fast forward") || detail.contains("fast-forward"))) {
+                    // Someone pushed to the branch meanwhile.
+                    throw new CloudProviderException(
+                        "CLOUD_DOCUMENT_CONFLICT",
+                        "This branch changed on GitHub while committing; reopen the document and try again"
+                    );
+                }
+                throw commitException(moved, refused);
             }
 
             JSONObject committer = commit.optJSONObject("committer");
@@ -832,14 +836,16 @@ final class GitHubClient {
             request.put("ref", "refs/heads/" + branch);
             request.put("sha", fromSha);
             HttpTransport.Response response = send(accessToken, "POST", repoUrl + "/git/refs", request);
-            if (response.status == 422) {
+            JSONObject json = parseJson(response.body);
+            String detail = json == null ? "" : json.optString("message", "");
+            if (response.status == 422 && detail.toLowerCase(Locale.US).contains("already exists")) {
                 throw new CloudProviderException(
                     "CLOUD_NAME_EXISTS",
                     "A branch with this name already exists on GitHub"
                 );
             }
             if (response.status != 201) {
-                throw commitException(response, parseJson(response.body));
+                throw commitException(response, json);
             }
         } catch (JSONException ex) {
             throw new IllegalStateException("Branch request serialization failed", ex);
@@ -993,8 +999,10 @@ final class GitHubClient {
                 "GitHub rejected the commit" + (detail.length() > 0 ? ": " + detail : "")
             );
         }
-        String remaining = response.header("X-RateLimit-Remaining");
-        if ((response.status == 403 || response.status == 404) && !"0".equals(remaining)) {
+        if (response.status == 403 && (isRateLimited(response, json) || isSsoRequired(response, json))) {
+            return statusException(response, "CLOUD_WRITE_FAILED", "GitHub commit failed");
+        }
+        if (response.status == 403 || response.status == 404) {
             return new CloudProviderException(
                 "CLOUD_WRITE_FORBIDDEN",
                 "This GitHub account cannot commit to this repository"
@@ -1102,21 +1110,89 @@ final class GitHubClient {
             );
         }
         // GitHub answers 403 for rate limits as well as missing access.
-        String remaining = response.header("X-RateLimit-Remaining");
-        if ((response.status == 403 && "0".equals(remaining)) || response.status == 429 || response.status >= 500) {
+        JSONObject json = parseJson(response.body);
+        if ((response.status == 403 && isRateLimited(response, json)) || response.status == 429 || response.status >= 500) {
             return new CloudProviderException(
                 "CLOUD_UNAVAILABLE",
                 "GitHub is temporarily unavailable; try again shortly"
             );
         }
-        if (response.status == 404 || response.status == 403) {
+        if (response.status == 404) {
             // Private repositories the token cannot see read as 404.
             return new CloudProviderException(
                 "CLOUD_DOCUMENT_NOT_FOUND",
                 "This GitHub document was moved, deleted, or is not accessible"
             );
         }
+        if (response.status == 403) {
+            if (isSsoRequired(response, json)) {
+                return new CloudProviderException(
+                    "CLOUD_SSO_REQUIRED",
+                    "This organization requires single sign-on; authorize the GitHub access for it and try again"
+                );
+            }
+            String missingScope = missingOAuthScope(response);
+            if (missingScope != null) {
+                return new CloudProviderException(
+                    "CLOUD_ACCESS_DENIED",
+                    "The GitHub access lacks the \"" + missingScope + "\" permission; connect the account again"
+                );
+            }
+            String detail = json == null ? "" : firstLine(json.optString("message", ""));
+            return new CloudProviderException(
+                "CLOUD_ACCESS_DENIED",
+                "GitHub denied access to this repository" + (detail.length() > 0 ? ": " + detail : "")
+            );
+        }
         return new CloudProviderException(fallbackCode, fallbackMessage + " (HTTP " + response.status + ")");
+    }
+
+    /** Primary (remaining 0) or secondary (Retry-After, message) rate limits. */
+    private static boolean isRateLimited(HttpTransport.Response response, JSONObject json) {
+        if ("0".equals(response.header("X-RateLimit-Remaining")) || response.header("Retry-After") != null) {
+            return true;
+        }
+        String message = json == null ? "" : json.optString("message", "").toLowerCase(Locale.US);
+        return message.contains("rate limit");
+    }
+
+    /** SAML SSO enforcement: GitHub names it in a header and the message. */
+    private static boolean isSsoRequired(HttpTransport.Response response, JSONObject json) {
+        if (response.header("X-GitHub-SSO") != null) {
+            return true;
+        }
+        String message = json == null ? "" : json.optString("message", "");
+        return message.contains("SAML");
+    }
+
+    /**
+     * A scope the endpoint accepts that the (classic OAuth) token lacks, or
+     * null when GitHub did not say or the token has one of them.
+     */
+    private static String missingOAuthScope(HttpTransport.Response response) {
+        String accepted = response.header("X-Accepted-OAuth-Scopes");
+        String granted = response.header("X-OAuth-Scopes");
+        if (accepted == null || granted == null || accepted.trim().length() == 0) {
+            return null;
+        }
+        List<String> grantedScopes = new ArrayList<>();
+        for (String scope : granted.split(",")) {
+            grantedScopes.add(scope.trim());
+        }
+        String first = null;
+        for (String scope : accepted.split(",")) {
+            String trimmed = scope.trim();
+            if (trimmed.length() == 0) {
+                continue;
+            }
+            if (grantedScopes.contains(trimmed)) {
+                return null;
+            }
+            if (first == null) {
+                first = trimmed;
+            }
+        }
+        return first;
     }
 
     private static Map<String, String> apiHeaders(String accessToken) {

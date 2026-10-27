@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backup and device transfer on Android 12 (API 31) and later; see
+     backup_rules.xml for older versions. Tokens and remembered Git
+     passwords stay on this device either way. Git working copies skip the
+     quota-limited cloud backup but move along in a device-to-device
+     transfer, so uncommitted edits are not lost with the old phone. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="cloud_documents.xml" />
+        <exclude domain="sharedpref" path="git_credentials.xml" />
+        <exclude domain="file" path="repositories/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="cloud_documents.xml" />
+        <exclude domain="sharedpref" path="git_credentials.xml" />
+    </device-transfer>
+</data-extraction-rules>

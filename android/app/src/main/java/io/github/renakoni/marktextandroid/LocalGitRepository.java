@@ -17,12 +17,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.TreeSet;
+import java.util.concurrent.locks.Lock;
 import org.eclipse.jgit.api.CheckoutCommand;
 import org.eclipse.jgit.api.CreateBranchCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.ListBranchCommand;
 import org.eclipse.jgit.api.MergeResult;
-import org.eclipse.jgit.api.PullResult;
 import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.api.errors.CheckoutConflictException;
@@ -48,9 +49,11 @@ import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.lib.RepositoryState;
 import org.eclipse.jgit.lib.StoredConfig;
+import org.eclipse.jgit.merge.MergeStrategy;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.FetchResult;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
@@ -58,6 +61,7 @@ import org.eclipse.jgit.treewalk.AbstractTreeIterator;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.treewalk.EmptyTreeIterator;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.util.FileUtils;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 
 /**
@@ -75,6 +79,13 @@ final class LocalGitRepository implements AutoCloseable {
     static final String REMOTE = "origin";
     /** Text sides of a diff larger than this are reported as too large. */
     static final int MAX_DIFF_BYTES = 1024 * 1024;
+    /**
+     * Clone, fetch and push give up when the remote sends nothing for this
+     * long, so a stalled connection cannot hold the repository forever.
+     */
+    static final int TRANSPORT_TIMEOUT_SECONDS = 60;
+    /** Atomic-write temporaries live here, inside .git, so no add ever stages one. */
+    private static final String TEMPORARY_DIRECTORY = "marktext-tmp";
 
     /** Receives clone/fetch/push progress; may be called often. */
     interface ProgressListener {
@@ -230,14 +241,15 @@ final class LocalGitRepository implements AutoCloseable {
                 .setDirectory(directory)
                 .setRemote(REMOTE)
                 .setCredentialsProvider(credentials)
-                .setProgressMonitor(monitor(progress));
+                .setProgressMonitor(monitor(progress))
+                .setTimeout(TRANSPORT_TIMEOUT_SECONDS);
             if (branch != null && branch.length() > 0) {
                 clone.setBranch(Constants.R_HEADS + branch);
             }
             return new LocalGitRepository(clone.call());
         } catch (GitAPIException ex) {
             deleteRecursively(directory);
-            throw translate(ex, "CLONE_FAILED", "The repository could not be cloned");
+            throw translate(ex, "CLONE_FAILED", "The repository could not be cloned", url);
         } catch (RuntimeException ex) {
             deleteRecursively(directory);
             throw new LocalRepositoryException("CLONE_FAILED", "The repository could not be cloned", ex);
@@ -367,14 +379,25 @@ final class LocalGitRepository implements AutoCloseable {
         if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
             throw new LocalRepositoryException("DOCUMENT_WRITE_FAILED", "The folder could not be created");
         }
-        // Write a sibling then rename, so a crash never leaves half a file.
-        File temporary = new File(parent, "." + file.getName() + ".marktext-tmp");
-        try (OutputStream output = new FileOutputStream(temporary)) {
-            output.write(bytes);
-            output.flush();
+        // Write a temporary then rename, so a crash never leaves half a
+        // file. It lives under .git (same filesystem, so the rename stays
+        // atomic) where a crash-left one is never committed by `add .`.
+        File temporaryDirectory = new File(git.getRepository().getDirectory(), TEMPORARY_DIRECTORY);
+        File temporary = null;
+        try {
+            if (!temporaryDirectory.isDirectory() && !temporaryDirectory.mkdirs()) {
+                throw new IOException("The temporary folder could not be created");
+            }
+            temporary = File.createTempFile("write-", ".tmp", temporaryDirectory);
+            try (OutputStream output = new FileOutputStream(temporary)) {
+                output.write(bytes);
+                output.flush();
+            }
         } catch (IOException ex) {
-            //noinspection ResultOfMethodCallIgnored
-            temporary.delete();
+            if (temporary != null) {
+                //noinspection ResultOfMethodCallIgnored
+                temporary.delete();
+            }
             throw new LocalRepositoryException("DOCUMENT_WRITE_FAILED", "This file could not be saved", ex);
         }
         if (!temporary.renameTo(file)) {
@@ -445,6 +468,7 @@ final class LocalGitRepository implements AutoCloseable {
                 .setRefSpecs(new RefSpec(Constants.R_HEADS + branch + ":" + Constants.R_HEADS + branch))
                 .setCredentialsProvider(credentials)
                 .setProgressMonitor(monitor(progress))
+                .setTimeout(TRANSPORT_TIMEOUT_SECONDS)
                 .call();
             for (PushResult result : results) {
                 for (RemoteRefUpdate update : result.getRemoteUpdates()) {
@@ -468,38 +492,76 @@ final class LocalGitRepository implements AutoCloseable {
                 }
             }
         } catch (GitAPIException ex) {
-            throw translate(ex, "PUSH_FAILED", "The push failed");
+            throw translate(ex, "PUSH_FAILED", "The push failed", getRemoteUrl());
         }
         ensureUpstream(branch);
+    }
+
+    PullOutcome pull(CredentialsProvider credentials, ProgressListener progress) throws LocalRepositoryException {
+        return pull(credentials, progress, null);
     }
 
     /**
      * Fetches and merges the upstream branch. Conflicts leave the
      * repository MERGING with markers in the files; edits to files the
-     * merge would overwrite stop it before anything changes.
+     * merge would overwrite stop it before anything changes. Edits to
+     * other files are allowed and survive both abortMerge and
+     * completeMerge untouched.
+     *
+     * Only the merge, which rewrites the working tree, holds
+     * {@code workTreeLock} (when given); the fetch runs without it, so
+     * saving files never waits on the network.
      */
-    PullOutcome pull(CredentialsProvider credentials, ProgressListener progress) throws LocalRepositoryException {
+    PullOutcome pull(CredentialsProvider credentials, ProgressListener progress, Lock workTreeLock)
+        throws LocalRepositoryException {
         if (isMergeInProgress()) {
             throw new LocalRepositoryException("MERGE_IN_PROGRESS", "Finish or abort the current merge first");
         }
+        String upstream;
         try {
             String branch = git.getRepository().getBranch();
-            if (git.getRepository().getConfig().getString("branch", branch, "merge") == null) {
-                throw new LocalRepositoryException("NO_UPSTREAM", "This branch is not on the remote yet; push it first");
-            }
+            upstream = git.getRepository().getConfig().getString("branch", branch, "merge");
         } catch (IOException ex) {
             throw new LocalRepositoryException("PULL_FAILED", "The branch could not be read", ex);
         }
+        if (upstream == null) {
+            throw new LocalRepositoryException("NO_UPSTREAM", "This branch is not on the remote yet; push it first");
+        }
+        FetchResult fetched;
         try {
-            PullResult result = git.pull()
+            fetched = git.fetch()
                 .setRemote(REMOTE)
                 .setCredentialsProvider(credentials)
                 .setProgressMonitor(monitor(progress))
+                .setTimeout(TRANSPORT_TIMEOUT_SECONDS)
                 .call();
-            MergeResult merge = result.getMergeResult();
-            if (merge == null) {
-                return new PullOutcome("up-to-date", Collections.emptyList());
-            }
+        } catch (InvalidConfigurationException ex) {
+            throw new LocalRepositoryException("NO_UPSTREAM", "This branch is not on the remote yet; push it first", ex);
+        } catch (GitAPIException ex) {
+            throw translate(ex, "PULL_FAILED", "The pull failed", getRemoteUrl());
+        }
+        Ref advertised = fetched.getAdvertisedRef(upstream);
+        if (advertised == null) {
+            advertised = fetched.getAdvertisedRef(Constants.R_HEADS + upstream);
+        }
+        if (advertised == null || advertised.getObjectId() == null) {
+            throw new LocalRepositoryException("NO_UPSTREAM", "This branch is not on the remote anymore; push it first");
+        }
+
+        if (workTreeLock != null) {
+            workTreeLock.lock();
+        }
+        try {
+            // Same merge PullCommand would run, named the way it names it.
+            MergeResult merge = git.merge()
+                .include(
+                    "branch '" + Repository.shortenRefName(upstream) + "' of " + withoutUserInfo(getRemoteUrl()),
+                    advertised.getObjectId()
+                )
+                .setStrategy(MergeStrategy.RECURSIVE)
+                .setCommit(true)
+                .setProgressMonitor(monitor(progress))
+                .call();
             switch (merge.getMergeStatus()) {
                 case ALREADY_UP_TO_DATE:
                     return new PullOutcome("up-to-date", Collections.emptyList());
@@ -533,8 +595,6 @@ final class LocalGitRepository implements AutoCloseable {
                 default:
                     throw new LocalRepositoryException("PULL_FAILED", "The pull could not be completed");
             }
-        } catch (InvalidConfigurationException ex) {
-            throw new LocalRepositoryException("NO_UPSTREAM", "This branch is not on the remote yet; push it first", ex);
         } catch (CheckoutConflictException ex) {
             // A fast-forward that would overwrite uncommitted edits.
             throw new LocalRepositoryException(
@@ -544,7 +604,11 @@ final class LocalGitRepository implements AutoCloseable {
                 ex
             );
         } catch (GitAPIException ex) {
-            throw translate(ex, "PULL_FAILED", "The pull failed");
+            throw failure("PULL_FAILED", "The pull could not be completed", ex);
+        } finally {
+            if (workTreeLock != null) {
+                workTreeLock.unlock();
+            }
         }
     }
 
@@ -587,7 +651,11 @@ final class LocalGitRepository implements AutoCloseable {
         }
     }
 
-    /** Commits the resolved merge or revert. */
+    /**
+     * Commits the resolved merge or revert: exactly what the merge staged
+     * plus the resolutions. Unrelated uncommitted edits stay uncommitted
+     * instead of being swept into the merge commit.
+     */
     CommitInfo completeMerge(String message) throws LocalRepositoryException {
         if (!isMergeInProgress()) {
             throw new LocalRepositoryException("NO_MERGE_IN_PROGRESS", "There is no merge to complete");
@@ -600,17 +668,66 @@ final class LocalGitRepository implements AutoCloseable {
                 finalMessage = null;
             }
         }
-        return commitAll(finalMessage == null || finalMessage.trim().length() == 0 ? "Merge" : finalMessage);
+        try {
+            if (!git.status().call().getConflicting().isEmpty()) {
+                throw new LocalRepositoryException("CONFLICTS_UNRESOLVED", "Resolve every conflict before committing");
+            }
+            RevCommit commit = git.commit()
+                .setMessage(finalMessage == null || finalMessage.trim().length() == 0 ? "Merge" : finalMessage)
+                .setAllowEmpty(true)
+                .call();
+            return describe(commit);
+        } catch (UnmergedPathsException ex) {
+            throw new LocalRepositoryException("CONFLICTS_UNRESOLVED", "Resolve every conflict before committing", ex);
+        } catch (GitAPIException ex) {
+            throw failure("COMMIT_FAILED", "The commit could not be created", ex);
+        }
     }
 
-    /** Drops the merge or revert in progress and everything it changed. */
+    /**
+     * Drops the merge or revert in progress and everything it changed: the
+     * paths it staged or left conflicting return to HEAD. Other uncommitted
+     * edits are kept — the merge refused to start over any file it touches,
+     * so those were never part of it.
+     */
     void abortMerge() throws LocalRepositoryException {
         if (!isMergeInProgress()) {
             throw new LocalRepositoryException("NO_MERGE_IN_PROGRESS", "There is no merge to abort");
         }
+        Repository repository = git.getRepository();
         try {
-            git.reset().setMode(ResetCommand.ResetType.HARD).setRef(Constants.HEAD).call();
-        } catch (GitAPIException ex) {
+            // The app never stages outside a commit, so whatever differs
+            // between HEAD and the index is the merge's own work.
+            Status status = git.status().call();
+            Set<String> paths = new TreeSet<>();
+            paths.addAll(status.getAdded());
+            paths.addAll(status.getChanged());
+            paths.addAll(status.getRemoved());
+            paths.addAll(status.getConflicting());
+            if (!paths.isEmpty()) {
+                ResetCommand reset = git.reset().setRef(Constants.HEAD);
+                for (String path : paths) {
+                    reset.addPath(path);
+                }
+                reset.call();
+                CheckoutCommand checkout = git.checkout();
+                boolean restore = false;
+                for (String path : paths) {
+                    if (isTrackedAtHead(path)) {
+                        checkout.addPath(path);
+                        restore = true;
+                    } else {
+                        deleteRecursively(new File(workTree, path));
+                    }
+                }
+                if (restore) {
+                    checkout.call();
+                }
+            }
+            repository.writeMergeHeads(null);
+            repository.writeRevertHead(null);
+            repository.writeMergeCommitMsg(null);
+        } catch (GitAPIException | IOException ex) {
             throw failure("ABORT_FAILED", "The merge could not be aborted", ex);
         }
     }
@@ -979,44 +1096,118 @@ final class LocalGitRepository implements AutoCloseable {
         return new LocalRepositoryException(code, message, cause);
     }
 
-    /** Network and authentication failures get their own codes; the rest the fallback. */
-    static LocalRepositoryException translate(GitAPIException ex, String fallbackCode, String fallbackMessage) {
+    /**
+     * Network and authentication failures get their own codes; a remote
+     * that answered but refused (protocol errors, hooks, hung up) is
+     * TRANSPORT_FAILED with JGit's reason; the rest the fallback.
+     */
+    static LocalRepositoryException translate(
+        GitAPIException ex,
+        String fallbackCode,
+        String fallbackMessage,
+        String remoteUrl
+    ) {
         if (ex instanceof org.eclipse.jgit.api.errors.InvalidRemoteException) {
             return new LocalRepositoryException("REMOTE_NOT_FOUND", "The remote repository was not found", ex);
         }
-        if (ex instanceof TransportException) {
-            String detail = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.US);
-            if (detail.contains("not authorized") || detail.contains("authentication")
-                || detail.contains("401") || detail.contains("403")) {
+        if (!(ex instanceof TransportException)) {
+            return new LocalRepositoryException(fallbackCode, fallbackMessage, ex);
+        }
+        boolean github = GitCredentialStore.isGitHubHost(GitCredentialStore.hostKey(remoteUrl));
+        String detail = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase(Locale.US);
+        if (detail.contains("no credentialsprovider")) {
+            // The remote asked for a sign-in and none was available.
+            return new LocalRepositoryException(
+                "AUTH_REQUIRED",
+                github
+                    ? "This repository needs the GitHub account; connect it first"
+                    : "This remote needs a username and password (or token)",
+                ex
+            );
+        }
+        if (detail.contains("not authorized") || detail.contains("authentication not supported")) {
+            return new LocalRepositoryException(
+                "AUTH_FAILED",
+                github
+                    ? "GitHub refused the sign-in; connect the GitHub account again"
+                    : "The remote refused the username and password (or token)",
+                ex
+            );
+        }
+        if (detail.contains("not permitted")) {
+            // HTTP 403: signed in, but without access (e.g. no write permission).
+            return new LocalRepositoryException(
+                "REMOTE_ACCESS_DENIED",
+                github
+                    ? "This GitHub account does not have access to push or pull this repository"
+                    : "This account does not have access to push or pull this repository",
+                ex
+            );
+        }
+        if (ex.getCause() instanceof org.eclipse.jgit.errors.NoRemoteRepositoryException
+            || detail.contains("not found")) {
+            return new LocalRepositoryException("REMOTE_NOT_FOUND", "The remote repository was not found", ex);
+        }
+        for (Throwable cause = ex.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.net.SocketTimeoutException) {
+                return new LocalRepositoryException("NETWORK_FAILED", "The remote did not respond in time", ex);
+            }
+            if (cause instanceof javax.net.ssl.SSLException) {
                 return new LocalRepositoryException(
-                    "AUTH_FAILED",
-                    "The remote refused the sign-in; connect the GitHub account again",
+                    "NETWORK_FAILED",
+                    "A secure connection to the remote could not be established",
                     ex
                 );
             }
-            if (detail.contains("not found") || detail.contains("404")) {
-                return new LocalRepositoryException("REMOTE_NOT_FOUND", "The remote repository was not found", ex);
+            if (cause instanceof UnknownHostException || cause instanceof java.net.SocketException
+                || cause instanceof java.io.InterruptedIOException) {
+                return new LocalRepositoryException("NETWORK_FAILED", "The remote could not be reached", ex);
             }
-            for (Throwable cause = ex.getCause(); cause != null; cause = cause.getCause()) {
-                if (cause instanceof UnknownHostException || cause instanceof java.net.SocketException
-                    || cause instanceof java.net.SocketTimeoutException) {
-                    return new LocalRepositoryException("NETWORK_FAILED", "The remote could not be reached", ex);
-                }
-            }
-            return new LocalRepositoryException("NETWORK_FAILED", "The remote could not be reached", ex);
         }
-        return new LocalRepositoryException(fallbackCode, fallbackMessage, ex);
+        if (detail.contains("timed out") || detail.contains("time out")) {
+            return new LocalRepositoryException("NETWORK_FAILED", "The remote did not respond in time", ex);
+        }
+        String reason = transportReason(ex.getMessage());
+        return new LocalRepositoryException(
+            "TRANSPORT_FAILED",
+            reason.length() == 0 ? fallbackMessage : reason,
+            ex
+        );
     }
 
-    static void deleteRecursively(File file) {
-        File[] children = file.listFiles();
-        if (children != null) {
-            for (File child : children) {
-                deleteRecursively(child);
-            }
+    /**
+     * JGit's "<uri>: <reason>" without the URI prefix and with any
+     * credentials in URLs removed, safe to show and log.
+     */
+    static String transportReason(String message) {
+        if (message == null) {
+            return "";
         }
-        //noinspection ResultOfMethodCallIgnored
-        file.delete();
+        String reason = message.trim();
+        int newline = reason.indexOf('\n');
+        if (newline >= 0) {
+            reason = reason.substring(0, newline).trim();
+        }
+        reason = reason.replaceFirst("^[a-zA-Z][a-zA-Z0-9+.-]*://\\S*?:\\s+", "");
+        return withoutUserInfo(reason);
+    }
+
+    /** Drops "user:password@" from every URL in the text. */
+    static String withoutUserInfo(String text) {
+        return text == null ? "" : text.replaceAll("([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\\s]+@", "$1");
+    }
+
+    /**
+     * Deletes a file or folder tree without following symbolic links: a
+     * link inside a repository (say {@code x -> ..}) is removed as a link,
+     * never by emptying what it points at.
+     */
+    static void deleteRecursively(File file) {
+        try {
+            FileUtils.delete(file, FileUtils.RECURSIVE | FileUtils.SKIP_MISSING | FileUtils.IGNORE_ERRORS);
+        } catch (IOException ignored) {
+            // IGNORE_ERRORS: best effort, like File.delete.
+        }
     }
 
     private static ProgressMonitor monitor(ProgressListener listener) {

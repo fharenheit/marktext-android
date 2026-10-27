@@ -69,6 +69,44 @@ public class GitHubImageServerTest {
     }
 
     @Test
+    public void commitsReopensAndBranchSwitchesDropTheBranchesCachedImages() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        GitHubImageServer server = server(transport);
+        server.setContext(document("o/r/main/README.md"));
+
+        server.serve("/_marktext_github_/o/r/main/a.png");
+        server.invalidate(document("o/r/main/README.md"));
+        server.serve("/_marktext_github_/o/r/main/a.png");
+        assertEquals(2, transport.requests.size());
+
+        server.invalidate(document("o/r/other/README.md"));
+        server.invalidate(document("o/elsewhere/main/README.md"));
+        server.serve("/_marktext_github_/o/r/main/a.png");
+        assertEquals(2, transport.requests.size());
+
+        server.setContext(document("o/r/feature/README.md"));
+        server.setContext(document("o/r/main/README.md"));
+        server.serve("/_marktext_github_/o/r/main/a.png");
+        assertEquals(3, transport.requests.size());
+
+        server.setContext(document("o/r/main/other.md"));
+        server.serve("/_marktext_github_/o/r/main/a.png");
+        assertEquals(3, transport.requests.size());
+    }
+
+    @Test
+    public void forbiddenImagesReadAsForbidden() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.status = 403;
+        transport.body = "{\"message\":\"Resource not accessible by personal access token\"}"
+            .getBytes(StandardCharsets.UTF_8);
+        GitHubImageServer server = server(transport);
+        server.setContext(document("o/r/main/README.md"));
+
+        assertEquals(403, server.serve("/_marktext_github_/o/r/main/a.png").status);
+    }
+
+    @Test
     public void refusesOtherRepositoriesBranchesAndNoContext() throws Exception {
         FakeTransport transport = new FakeTransport();
         GitHubImageServer server = server(transport);
