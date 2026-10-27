@@ -38,7 +38,9 @@ jobs:
 
       # All four secrets set: a release-signed APK. None set: a debug-signed
       # APK, so a fork without its own keystore can still publish builds.
-      # Some but not all set is a configuration mistake and fails.
+      # Some but not all set is a configuration mistake and fails. Debug
+      # builds sign with ANDROID_DEBUG_KEYSTORE_BASE64 when it is set, so
+      # successive debug releases share a key and update each other.
       - name: Choose signing mode
         id: signing
         shell: bash
@@ -77,7 +79,27 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match app version v$app_version"
             exit 1
           fi
+          gradle_version="$(sed -n -E 's/^ *versionName "([^"]+)".*/\1/p' android/app/build.gradle)"
+          info_version="$(sed -n -E "s/^const VERSION = '([^']+)'.*/\1/p" src/lib/appInfo.ts)"
+          if [[ "$gradle_version" != "$app_version" || "$info_version" != "$app_version" ]]; then
+            echo "::error::Version mismatch: package.json $app_version, build.gradle $gradle_version, appInfo.ts $info_version"
+            exit 1
+          fi
           echo "APP_VERSION=$app_version" >> "$GITHUB_ENV"
+
+      # A manual publish tags v<version> at this commit. Re-running at the
+      # same commit refreshes the assets; an existing tag elsewhere means the
+      # version was not bumped, and its release must not be overwritten.
+      - name: Check release tag
+        if: github.ref_type != 'tag' && inputs.publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_sha="$(git ls-remote origin "refs/tags/v$APP_VERSION^{}" "refs/tags/v$APP_VERSION" | head -n 1 | cut -f 1)"
+          if [[ -n "$tag_sha" && "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::v$APP_VERSION is already tagged at $tag_sha; bump the version before publishing"
+            exit 1
+          fi
 
       - name: Install Muya dependencies
         run: pnpm --dir third_party/muya install
@@ -115,6 +137,21 @@ jobs:
           chmod +x android/gradlew
           ./android/gradlew -p android testDebugUnitTest assembleRelease --no-daemon
 
+      - name: Install shared debug keystore
+        if: steps.signing.outputs.mode == 'debug'
+        shell: bash
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$ANDROID_DEBUG_KEYSTORE_BASE64" ]]; then
+            echo '::warning::No ANDROID_DEBUG_KEYSTORE_BASE64; this APK is signed with a one-off debug key'
+            exit 0
+          fi
+          mkdir -p "$HOME/.android"
+          printf '%s' "$ANDROID_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+
       - name: Build debug-signed APK
         if: steps.signing.outputs.mode == 'debug'
         run: |
@@ -128,6 +165,7 @@ jobs:
           # The release certificate pin lives in a repository variable so each
           # fork pins its own key; without it the signature is only verified.
           EXPECTED_CERT_SHA256: ${{ vars.ANDROID_RELEASE_CERT_SHA256 }}
+          EXPECTED_DEBUG_CERT_SHA256: ${{ vars.ANDROID_DEBUG_CERT_SHA256 }}
           SIGNING_MODE: ${{ steps.signing.outputs.mode }}
         run: |
           set -euo pipefail
@@ -157,6 +195,11 @@ jobs:
           if [[ "$SIGNING_MODE" == 'release' && -n "$EXPECTED_CERT_SHA256" \
             && "$actual_cert_sha256" != "$EXPECTED_CERT_SHA256" ]]; then
             echo "::error::Release certificate mismatch: $actual_cert_sha256"
+            exit 1
+          fi
+          if [[ "$SIGNING_MODE" == 'debug' && -n "$EXPECTED_DEBUG_CERT_SHA256" \
+            && "$actual_cert_sha256" != "$EXPECTED_DEBUG_CERT_SHA256" ]]; then
+            echo "::error::Debug certificate mismatch: $actual_cert_sha256"
             exit 1
           fi
           echo "Signing certificate SHA-256: $actual_cert_sha256"
@@ -199,7 +242,7 @@ jobs:
           else
             notes=''
             if [[ "$SIGNING_MODE" == 'debug' ]]; then
-              notes='This build is signed with a debug key (no release keystore is configured), so it cannot update an install signed with another key.'
+              notes='Debug build (no release keystore is configured): it installs as a separate app, io.github.renakoni.marktextandroid.debug, next to any release install. It updates only debug installs signed with the same debug key.'
             fi
             gh release create "$tag" \
               "$apk_path" \

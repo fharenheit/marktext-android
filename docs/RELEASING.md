@@ -31,6 +31,14 @@ ANDROID_RELEASE_KEY_ALIAS
 ANDROID_RELEASE_KEY_PASSWORD
 ```
 
+Without these four secrets the workflow publishes a debug-signed APK
+(application id `io.github.renakoni.marktextandroid.debug`). Set
+`ANDROID_DEBUG_KEYSTORE_BASE64` to a fixed debug keystore (alias
+`androiddebugkey`, store and key password `android`) so successive debug
+releases share a key and update each other; optionally pin its certificate
+with the `ANDROID_DEBUG_CERT_SHA256` repository variable (lowercase hex, no
+colons). Without it every run signs with a fresh key.
+
 On Windows, copy the keystore's Base64 form without printing it:
 
 ```powershell
