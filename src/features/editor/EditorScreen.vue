@@ -14,6 +14,8 @@ import MobileSelectionToolbar from './components/MobileSelectionToolbar.vue'
 import LinkActionOverlay from './components/LinkActionOverlay.vue'
 import ResumeCard from './components/ResumeCard.vue'
 import EditorFailurePanel from './components/EditorFailurePanel.vue'
+import SplitPreview from './components/SplitPreview.vue'
+import type { MuyaEditor } from './editorRuntime'
 import type { SelectionToolbarCommandId } from './selectionToolbar'
 import type { TableCommandId } from './tableCommands'
 import type { SelectionToolbarRows } from './selectionToolbarSettings'
@@ -93,6 +95,10 @@ const props = defineProps<{
   sourceEntryCaret: number
   /** False for setting-driven auto-entry: opening a document must not pop the keyboard. */
   sourceFocusOnEnter: boolean
+  /** Source and rendered preview together; implies source mode. */
+  splitViewActive?: boolean
+  previewTextStyle?: CSSProperties
+  getPreviewEditor?: () => MuyaEditor | null
 }>()
 
 const emit = defineEmits<{
@@ -148,6 +154,7 @@ const emit = defineEmits<{
   'discard-incoming': []
   'editor-host-change': [element: HTMLElement | null]
   'toggle-source-mode': [caret: { start: number, end: number } | null]
+  'toggle-split-view': [caret: { start: number, end: number } | null]
   'update:source-text': [value: string, caret: { start: number, end: number } | null]
 }>()
 
@@ -180,6 +187,21 @@ function onSourceInput(event: Event) {
 function onToggleSourceMode() {
   // Entering: no textarea caret exists yet. Exiting: hand the current one up.
   emit('toggle-source-mode', props.sourceModeActive ? readSourceCaret() : null)
+}
+
+function onToggleSplitView() {
+  emit('toggle-split-view', props.sourceModeActive ? readSourceCaret() : null)
+}
+
+const splitPreview = ref<InstanceType<typeof SplitPreview> | null>(null)
+
+function onSourceScroll(event: Event) {
+  if (!props.splitViewActive) {
+    return
+  }
+  const area = event.target as HTMLTextAreaElement
+  const range = area.scrollHeight - area.clientHeight
+  splitPreview.value?.syncScroll(range > 0 ? area.scrollTop / range : 0)
 }
 
 watch(
@@ -573,6 +595,7 @@ onBeforeUnmount(() => {
 
     <section
       class="editor-pane"
+      :class="{ 'editor-pane-split': splitViewActive && sourceModeActive }"
       :aria-label="t('editor.markdownEditor')"
       :aria-hidden="linkSheetBackgroundAriaHidden"
     >
@@ -604,6 +627,16 @@ onBeforeUnmount(() => {
         autocorrect="off"
         spellcheck="false"
         @input="onSourceInput"
+        @scroll.passive="onSourceScroll"
+      />
+
+      <SplitPreview
+        v-if="splitViewActive && sourceModeActive && getPreviewEditor"
+        ref="splitPreview"
+        :markdown="sourceText"
+        :dir="textDirection"
+        :text-style="previewTextStyle ?? {}"
+        :get-editor="getPreviewEditor"
       />
 
       <!-- Non-modal offer: never blocks the editor, never scrolls on its own. -->
@@ -690,8 +723,10 @@ onBeforeUnmount(() => {
         :saving-to-device="savingToDevice"
         :saving-copy="savingCopy"
         :source-mode-active="sourceModeActive"
+        :split-view-active="Boolean(splitViewActive) && sourceModeActive"
         @close="emit('close-menu')"
         @toggle-source-mode="onToggleSourceMode"
+        @toggle-split-view="onToggleSplitView"
         @share="emit('share')"
         @export-pdf="emit('export-pdf')"
         @save-to-device="emit('save-to-device')"

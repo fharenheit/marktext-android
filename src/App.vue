@@ -222,6 +222,7 @@ import {
   getAppearanceTextSettings,
   getAppearanceThemeSettings,
   getEditorStyleVars,
+  resolveEditorFontFamily,
 } from './features/settings/appearanceSettings'
 import { getAdvancedDiagnostics } from './features/settings/advancedDiagnostics'
 import {
@@ -752,6 +753,34 @@ function toggleSourceModeFromScreen(caret: { start: number, end: number } | null
     enterSourceMode()
   }
 }
+
+// Split view = source mode plus a read-only rendered preview. Leaving source
+// mode by any route (toggle, document switch, reset) also leaves the split.
+const splitViewActive = ref(false)
+watch(sourceModeActive, active => {
+  if (!active) {
+    splitViewActive.value = false
+  }
+})
+
+function toggleSplitViewFromScreen(caret: { start: number, end: number } | null) {
+  if (splitViewActive.value) {
+    exitSourceMode(caret)
+    return
+  }
+  if (!sourceModeActive.value) {
+    enterSourceMode({ focus: false })
+  } else {
+    closeEditorMenu()
+  }
+  splitViewActive.value = sourceModeActive.value
+}
+
+const splitPreviewTextStyle = computed(() => ({
+  fontFamily: resolveEditorFontFamily(appearanceTextSettings.value.editorFontFamily),
+  fontSize: `${appearanceTextSettings.value.fontSize}px`,
+  lineHeight: String(appearanceTextSettings.value.lineHeight),
+}))
 
 const {
   searchOpen: editorSearchOpen,
@@ -3512,7 +3541,11 @@ onBeforeUnmount(() => {
     :source-text="sourceModeText"
     :source-entry-caret="sourceModeEntryCaret"
     :source-focus-on-enter="sourceModeFocusOnEnter"
+    :split-view-active="splitViewActive"
+    :preview-text-style="splitPreviewTextStyle"
+    :get-preview-editor="getEditor"
     @toggle-source-mode="toggleSourceModeFromScreen"
+    @toggle-split-view="toggleSplitViewFromScreen"
     @update:source-text="
       (value: string, caret: { start: number, end: number } | null) =>
         sourceMode.updateText(value, caret)

@@ -19,6 +19,7 @@ defineProps<{
   savingToDevice: boolean
   savingCopy: boolean
   sourceModeActive: boolean
+  splitViewActive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -31,6 +32,7 @@ const emit = defineEmits<{
   'show-changes': []
   'revert-changes': []
   'toggle-source-mode': []
+  'toggle-split-view': []
 }>()
 
 const { t } = useI18n()
@@ -73,6 +75,24 @@ const { onModalKeydown } = useModalFocus({
           </span>
           <span class="editor-action-label">
             {{ sourceModeActive ? t('editor.actions.exitSourceMode') : t('editor.actions.sourceMode') }}
+          </span>
+        </button>
+        <button
+          class="editor-action-row"
+          type="button"
+          role="menuitemcheckbox"
+          :aria-checked="Boolean(splitViewActive)"
+          data-testid="split-view-toggle-button"
+          @click="emit('toggle-split-view')"
+        >
+          <span class="editor-action-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="4" y="4" width="16" height="16" rx="2" />
+              <path d="M4 12h16" />
+            </svg>
+          </span>
+          <span class="editor-action-label">
+            {{ splitViewActive ? t('editor.actions.exitSplitView') : t('editor.actions.splitView') }}
           </span>
         </button>
         <button

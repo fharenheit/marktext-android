@@ -1094,6 +1094,28 @@ textarea {
   outline: none;
 }
 
+/* Split view: source above the rendered preview on a phone, side by side
+   once there is room for two columns. */
+.editor-pane-split {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editor-pane-split > .source-mode-editor,
+.editor-pane-split > .split-preview {
+  flex: 1 1 0;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+@media (min-width: 720px) and (orientation: landscape) {
+  .editor-pane-split {
+    flex-direction: row;
+  }
+}
+
 .editor-host-shell .muya-host {
   min-height: 100%;
 }
