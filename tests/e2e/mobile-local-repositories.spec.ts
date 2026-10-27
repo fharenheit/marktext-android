@@ -78,9 +78,40 @@ test('edits a working-copy file, reviews the diff and commits it', async ({ page
   await expect(page.getByText('No uncommitted changes.')).toBeVisible()
   await expect(page.getByTestId('repository-screen')).toContainText('1 to push')
 
+  // Nothing left to commit: the push sheet only pushes the waiting commit.
   await page.getByTestId('repository-push').click()
+  await expect(page.getByTestId('push-sheet')).toContainText('1 local commit(s) will be pushed')
+  await expect(page.getByTestId('push-sheet-message')).toHaveCount(0)
+  await page.getByTestId('push-sheet-confirm').click()
   await expect(page.getByTestId('repository-notice')).toContainText('Pushed')
   expect((await mockState(page)).ahead).toBe(0)
+})
+
+test('push lists the changed files, takes a message, then commits and pushes in one step', async ({ page }) => {
+  await openRepository(page)
+  await editDocument(page, 'README.md', 'pushed from the phone')
+  await page.getByTestId('back-button').click()
+  await expect(page.getByTestId('repository-screen')).toBeVisible()
+
+  await page.getByTestId('repository-push').click()
+  const sheet = page.getByTestId('push-sheet')
+  await expect(sheet).toBeVisible()
+  await expect(page.getByTestId('push-sheet-files')).toContainText('README.md')
+  await expect(page.getByTestId('push-sheet-message')).toHaveValue('Update README.md')
+  await snapshot(page, 'repo-13-push-sheet')
+
+  await page.getByTestId('push-sheet-message').fill('')
+  await expect(page.getByTestId('push-sheet-confirm')).toBeDisabled()
+  await page.getByTestId('push-sheet-message').fill('Phone notes')
+  await expect(page.getByTestId('push-sheet-confirm')).toHaveText('Commit & push')
+  await page.getByTestId('push-sheet-confirm').click()
+
+  await expect(sheet).toBeHidden()
+  await expect(page.getByTestId('repository-notice')).toContainText('Committed and pushed')
+  const state = await mockState(page)
+  expect(state.ahead).toBe(0)
+  expect((state.commits as Array<{ summary: string }>)[0].summary).toBe('Phone notes')
+  expect((state.head as Record<string, string>)['README.md']).toContain('pushed from the phone')
 })
 
 test('shows and reverts a working-copy document from the editor', async ({ page }) => {

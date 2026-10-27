@@ -18,6 +18,7 @@ import {
 } from '../../lib/localRepositories'
 import { isValidBranchName } from '../cloud-documents/githubBranches'
 import ConfirmSheet from './ConfirmSheet.vue'
+import PushSheet from './PushSheet.vue'
 import DiffView from './DiffView.vue'
 import { diffFilePath, formatCommitDate, formatProgress } from './repositoryFormatting'
 
@@ -190,12 +191,42 @@ async function pull() {
   }
 }
 
-async function push() {
+const pushSheetOpen = ref(false)
+
+/** Push opens the sheet with what is going out: changes to commit and/or local commits. */
+async function openPushSheet() {
+  if (busy.value !== null) {
+    return
+  }
+  await refreshStatus()
+  pushSheetOpen.value = true
+}
+
+/**
+ * Commit (when there are changes) and push as one step. A push that fails
+ * after the commit keeps the commit locally; the header shows it waiting.
+ */
+async function commitAndPush(message: string | null) {
+  if (message !== null) {
+    const created = await operate('push', () =>
+      callRepository(plugin => plugin.commitRepository({ id: id.value, message })),
+    )
+    if (!created) {
+      return
+    }
+    commitMessage.value = ''
+    await refreshStatus()
+  }
   const pushed = await operate('push', () => callRepository(plugin => plugin.pushRepository({ id: id.value })))
+  pushSheetOpen.value = false
   if (pushed) {
     status.value = pushed
-    notice.value = t('repo.pushed')
+    notice.value = message !== null ? t('push.committedAndPushed') : t('repo.pushed')
+  } else if (message !== null) {
+    const pushError = notice.value
+    notice.value = `${t('push.committedNotPushed')} ${pushError ?? ''}`.trim()
   }
+  await refreshAll()
 }
 
 // --- changes -------------------------------------------------------------
@@ -440,7 +471,7 @@ onBeforeUnmount(() => {
         class="repository-header-action"
         data-testid="repository-push"
         :disabled="busy !== null || mergeInProgress"
-        @click="push"
+        @click="openPushSheet"
       >
         {{ busy === 'push' ? t('repo.pushing') : t('repo.push') }}
       </button>
@@ -719,6 +750,16 @@ onBeforeUnmount(() => {
         </section>
       </div>
     </div>
+
+    <PushSheet
+      v-if="pushSheetOpen && status"
+      :changes="resolvedChanges"
+      :ahead="status.ahead"
+      :branch="status.branch"
+      :busy="busy === 'push'"
+      @push="commitAndPush"
+      @cancel="pushSheetOpen = false"
+    />
 
     <ConfirmSheet
       v-if="confirmation"
