@@ -31,7 +31,11 @@ jobs:
           java-version: '22'
           cache: gradle
 
-      - name: Validate release secrets
+      # All four secrets set: a release-signed APK. None set: a debug-signed
+      # APK, so a fork without its own keystore can still publish builds.
+      # Some but not all set is a configuration mistake and fails.
+      - name: Choose signing mode
+        id: signing
         shell: bash
         env:
           ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
@@ -40,19 +44,24 @@ jobs:
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          missing=0
+          missing=()
           for name in \
             ANDROID_RELEASE_KEYSTORE_BASE64 \
             ANDROID_RELEASE_STORE_PASSWORD \
             ANDROID_RELEASE_KEY_ALIAS \
             ANDROID_RELEASE_KEY_PASSWORD
           do
-            if [[ -z "${!name}" ]]; then
-              echo "::error::$name is not configured"
-              missing=1
-            fi
+            [[ -n "${!name}" ]] || missing+=("$name")
           done
-          [[ "$missing" -eq 0 ]]
+          if [[ "${#missing[@]}" -eq 0 ]]; then
+            echo 'mode=release' >> "$GITHUB_OUTPUT"
+          elif [[ "${#missing[@]}" -eq 4 ]]; then
+            echo '::warning::No release signing secrets; publishing a debug-signed APK'
+            echo 'mode=debug' >> "$GITHUB_OUTPUT"
+          else
+            for name in "${missing[@]}"; do echo "::error::$name is not configured"; done
+            exit 1
+          fi
 
       - name: Validate release version
         shell: bash
@@ -79,6 +88,7 @@ jobs:
         run: pnpm exec cap sync android
 
       - name: Decode release keystore
+        if: steps.signing.outputs.mode == 'release'
         shell: bash
         env:
           ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
@@ -90,6 +100,7 @@ jobs:
           chmod 600 "$RUNNER_TEMP/marktext-release.jks"
 
       - name: Build signed release APK
+        if: steps.signing.outputs.mode == 'release'
         env:
           ANDROID_RELEASE_KEYSTORE_FILE: ${{ runner.temp }}/marktext-release.jks
           ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
@@ -99,15 +110,29 @@ jobs:
           chmod +x android/gradlew
           ./android/gradlew -p android testDebugUnitTest assembleRelease --no-daemon
 
+      - name: Build debug-signed APK
+        if: steps.signing.outputs.mode == 'debug'
+        run: |
+          chmod +x android/gradlew
+          ./android/gradlew -p android testDebugUnitTest assembleDebug --no-daemon
+
       - name: Verify signature and prepare artifacts
         id: artifact
         shell: bash
         env:
-          EXPECTED_CERT_SHA256: 6ec922525bce1803428b80f0e2577d18246b2290b4f3bb16150fa707d1819c67
+          # The release certificate pin lives in a repository variable so each
+          # fork pins its own key; without it the signature is only verified.
+          EXPECTED_CERT_SHA256: ${{ vars.ANDROID_RELEASE_CERT_SHA256 }}
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
         run: |
           set -euo pipefail
-          source_apk='android/app/build/outputs/apk/release/app-release.apk'
-          apk_name="marktext-android-v${APP_VERSION}.apk"
+          if [[ "$SIGNING_MODE" == 'release' ]]; then
+            source_apk='android/app/build/outputs/apk/release/app-release.apk'
+            apk_name="marktext-android-v${APP_VERSION}.apk"
+          else
+            source_apk='android/app/build/outputs/apk/debug/app-debug.apk'
+            apk_name="marktext-android-v${APP_VERSION}-debug.apk"
+          fi
           artifact_dir='release-artifacts'
           mkdir -p "$artifact_dir"
           cp "$source_apk" "$artifact_dir/$apk_name"
@@ -124,10 +149,12 @@ jobs:
             | sed -n -E 's/^(Signer #[0-9]+|V[0-9.]+ Signer):? certificate SHA-256 digest: //p' \
             | head -n 1 \
             | tr '[:upper:]' '[:lower:]')"
-          if [[ "$actual_cert_sha256" != "$EXPECTED_CERT_SHA256" ]]; then
+          if [[ "$SIGNING_MODE" == 'release' && -n "$EXPECTED_CERT_SHA256" \
+            && "$actual_cert_sha256" != "$EXPECTED_CERT_SHA256" ]]; then
             echo "::error::Release certificate mismatch: $actual_cert_sha256"
             exit 1
           fi
+          echo "Signing certificate SHA-256: $actual_cert_sha256"
 
           (
             cd "$artifact_dir"
@@ -143,11 +170,12 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Create or update draft GitHub Release
+      - name: Create or update GitHub Release
         if: github.ref_type == 'tag'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
         run: |
           set -euo pipefail
           apk_path="release-artifacts/${{ steps.artifact.outputs.apk_name }}"
@@ -155,11 +183,15 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "$apk_path" "$checksum_path" --clobber
           else
+            notes=''
+            if [[ "$SIGNING_MODE" == 'debug' ]]; then
+              notes='This build is signed with a debug key (no release keystore is configured), so it cannot update an install signed with another key.'
+            fi
             gh release create "$GITHUB_REF_NAME" \
               "$apk_path" \
               "$checksum_path" \
               --verify-tag \
-              --draft \
               --generate-notes \
-              --title "MarkText $GITHUB_REF_NAME"
+              --notes "$notes" \
+              --title "MarkText for Data Dynamics Inc $GITHUB_REF_NAME"
           fi
