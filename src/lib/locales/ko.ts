@@ -350,7 +350,8 @@ export const ko = {
   'settings.code.wrapLines': '줄바꿈',
   'settings.code.trimEmptyLines': '빈 줄 제거',
   'settings.code.fontSize': '글꼴 크기',
-  'settings.code.font': '글꼴',
+  'settings.code.font': '고정폭(monospace) 글꼴',
+  'settings.code.sourceFont': '소스 편집기 글꼴',
   'settings.code.tabWidth': '탭 너비',
 
   'settings.markdown.looseLists': '느슨한 목록',

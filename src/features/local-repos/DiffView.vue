@@ -61,7 +61,7 @@ const summary = computed(() => countChanges(lines.value))
 
 <style scoped>
 .diff-view {
-  font-family: 'DejaVu Sans Mono', 'Roboto Mono', ui-monospace, monospace;
+  font-family: var(--mt-mono-font);
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text);

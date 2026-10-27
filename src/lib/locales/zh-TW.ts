@@ -350,7 +350,8 @@ export const zhTW = {
   'settings.code.wrapLines': '自動換行',
   'settings.code.trimEmptyLines': '清除空行',
   'settings.code.fontSize': '字型大小',
-  'settings.code.font': '字型',
+  'settings.code.font': '等寬字型',
+  'settings.code.sourceFont': '原始碼編輯器字型',
   'settings.code.tabWidth': 'Tab 寬度',
 
   'settings.markdown.looseLists': '鬆散清單',

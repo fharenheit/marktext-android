@@ -108,6 +108,7 @@ const RUNTIME_SETTING_DEFAULTS = new Map<string, SettingsValue>([
   ],
   ['codeFontSize', DEFAULT_EDITING_SETTINGS.codeFontSize],
   ['codeFontFamily', DEFAULT_EDITING_SETTINGS.codeFontFamily],
+  ['sourceFontFamily', DEFAULT_EDITING_SETTINGS.sourceFontFamily],
   ['tabSize', String(DEFAULT_EDITING_SETTINGS.tabSize)],
   ['spellcheckerEnabled', DEFAULT_EDITING_SETTINGS.spellcheckerEnabled],
   ['spellcheckerLanguage', DEFAULT_EDITING_SETTINGS.spellcheckerLanguage],

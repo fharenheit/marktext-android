@@ -345,7 +345,8 @@ export const en = {
   'settings.code.wrapLines': 'Wrap lines',
   'settings.code.trimEmptyLines': 'Trim empty lines',
   'settings.code.fontSize': 'Font size',
-  'settings.code.font': 'Font',
+  'settings.code.font': 'Monospace font',
+  'settings.code.sourceFont': 'Source editor font',
   'settings.code.tabWidth': 'Tab width',
 
   'settings.markdown.looseLists': 'Loose lists',

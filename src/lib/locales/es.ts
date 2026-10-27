@@ -350,7 +350,8 @@ export const es = {
   'settings.code.wrapLines': 'Ajustar líneas',
   'settings.code.trimEmptyLines': 'Recortar líneas vacías',
   'settings.code.fontSize': 'Tamaño de fuente',
-  'settings.code.font': 'Fuente',
+  'settings.code.font': 'Fuente monoespaciada',
+  'settings.code.sourceFont': 'Fuente del editor de código fuente',
   'settings.code.tabWidth': 'Ancho de tabulación',
 
   'settings.markdown.looseLists': 'Listas sueltas',

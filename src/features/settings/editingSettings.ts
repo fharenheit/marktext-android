@@ -33,6 +33,7 @@ export type EditingSettingKey =
   | 'trimUnnecessaryCodeBlockEmptyLines'
   | 'codeFontSize'
   | 'codeFontFamily'
+  | 'sourceFontFamily'
   | 'tabSize'
   | 'spellcheckerEnabled'
   | 'spellcheckerLanguage'
@@ -62,7 +63,10 @@ export interface EditingSettings {
   wrapCodeBlocks: boolean
   trimUnnecessaryCodeBlockEmptyLines: boolean
   codeFontSize: number
+  /** Every monospace span of the rendered document: code blocks, inline code, math/HTML source. */
   codeFontFamily: CodeFontFamily
+  /** The source-code (raw Markdown) editor. */
+  sourceFontFamily: CodeFontFamily
   tabSize: 1 | 2 | 3 | 4
   spellcheckerEnabled: boolean
   spellcheckerLanguage: SpellcheckerLanguage
@@ -111,6 +115,7 @@ export const EDITING_SETTING_KEYS = [
   'trimUnnecessaryCodeBlockEmptyLines',
   'codeFontSize',
   'codeFontFamily',
+  'sourceFontFamily',
   'tabSize',
   'spellcheckerEnabled',
   'spellcheckerLanguage',
@@ -142,6 +147,7 @@ export const DEFAULT_EDITING_SETTINGS = {
   trimUnnecessaryCodeBlockEmptyLines: true,
   codeFontSize: 14,
   codeFontFamily: 'd2coding',
+  sourceFontFamily: 'd2coding',
   tabSize: 4,
   spellcheckerEnabled: false,
   spellcheckerLanguage: 'en-US',
@@ -287,6 +293,7 @@ export function normalizeEditingSettingValue(key: EditingSettingKey, value: Sett
     case 'codeFontSize':
       return normalizeCodeFontSize(value)
     case 'codeFontFamily':
+    case 'sourceFontFamily':
       return normalizeCodeFontFamily(value)
     case 'tabSize':
       return normalizeTabSize(value)
@@ -407,6 +414,9 @@ export function getEditingSettings(
     ),
     codeFontFamily: normalizeCodeFontFamily(
       getValue('codeFontFamily', DEFAULT_EDITING_SETTINGS.codeFontFamily),
+    ),
+    sourceFontFamily: normalizeCodeFontFamily(
+      getValue('sourceFontFamily', DEFAULT_EDITING_SETTINGS.sourceFontFamily),
     ),
     tabSize: normalizeTabSize(getValue('tabSize', String(DEFAULT_EDITING_SETTINGS.tabSize))),
     spellcheckerEnabled: normalizeBoolean(

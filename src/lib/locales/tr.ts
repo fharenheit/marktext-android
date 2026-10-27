@@ -350,7 +350,8 @@ export const tr = {
   'settings.code.wrapLines': 'Satırları kaydır',
   'settings.code.trimEmptyLines': 'Boş satırları kırp',
   'settings.code.fontSize': 'Yazı tipi boyutu',
-  'settings.code.font': 'Yazı tipi',
+  'settings.code.font': 'Eş aralıklı yazı tipi',
+  'settings.code.sourceFont': 'Kaynak düzenleyici yazı tipi',
   'settings.code.tabWidth': 'Sekme genişliği',
 
   'settings.markdown.looseLists': 'Gevşek listeler',

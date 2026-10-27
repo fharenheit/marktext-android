@@ -85,6 +85,7 @@ describe('editingSettings', () => {
       ['plantumlServer', 'javascript:alert(1)'],
       ['codeFontSize', 'large'],
       ['codeFontFamily', 'comic-code'],
+      ['sourceFontFamily', 'comic-code'],
       ['tabSize', 'wide'],
       ['spellcheckerLanguage', 'it-IT'],
     ])
@@ -103,6 +104,7 @@ describe('editingSettings', () => {
       plantumlServer: DEFAULT_EDITING_SETTINGS.plantumlServer,
       codeFontSize: 14,
       codeFontFamily: 'd2coding',
+      sourceFontFamily: 'd2coding',
       tabSize: 4,
       spellcheckerLanguage: 'en-US',
     })

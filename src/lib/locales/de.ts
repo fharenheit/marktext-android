@@ -351,7 +351,8 @@ export const de = {
   'settings.code.wrapLines': 'Zeilen umbrechen',
   'settings.code.trimEmptyLines': 'Leere Zeilen entfernen',
   'settings.code.fontSize': 'Schriftgröße',
-  'settings.code.font': 'Schrift',
+  'settings.code.font': 'Festbreitenschrift',
+  'settings.code.sourceFont': 'Schrift im Quelltexteditor',
   'settings.code.tabWidth': 'Tab-Breite',
 
   'settings.markdown.looseLists': 'Lockere Listen',

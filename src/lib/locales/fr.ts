@@ -350,7 +350,8 @@ export const fr = {
   'settings.code.wrapLines': 'Retour à la ligne',
   'settings.code.trimEmptyLines': 'Supprimer les lignes vides',
   'settings.code.fontSize': 'Taille de police',
-  'settings.code.font': 'Police',
+  'settings.code.font': 'Police à chasse fixe',
+  'settings.code.sourceFont': 'Police de l’éditeur source',
   'settings.code.tabWidth': 'Largeur de tabulation',
 
   'settings.markdown.looseLists': 'Listes aérées',

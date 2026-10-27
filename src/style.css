@@ -1079,7 +1079,7 @@ textarea {
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   color: var(--text);
-  font-family: 'DejaVu Sans Mono', 'Roboto Mono', ui-monospace, monospace;
+  font-family: var(--mt-source-font);
   font-size: 15px;
   line-height: 1.6;
   resize: none;

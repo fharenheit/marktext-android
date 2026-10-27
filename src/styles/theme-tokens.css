@@ -34,6 +34,10 @@
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.34, 1.3, 0.5, 1);
 
+  /* Fonts: App.vue overrides both from the code and source-editor font settings. */
+  --mt-mono-font: 'D2Coding Ligature', 'DejaVu Sans Mono', 'Roboto Mono', ui-monospace, monospace;
+  --mt-source-font: 'D2Coding Ligature', 'DejaVu Sans Mono', 'Roboto Mono', ui-monospace, monospace;
+
   color: var(--text);
   background: var(--app-bg);
   font-family:

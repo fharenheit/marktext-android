@@ -212,7 +212,7 @@
 
     color: var(--editor-color-50);
     font-size: 90%;
-    font-family: 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace;
+    font-family: var(--mu-code-font-family, 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace);
     line-height: 1.6;
 
     background: var(--code-block-bg-color);
@@ -220,7 +220,7 @@
     border-radius: 3px;
 }
 
-/* Code-block font via `--mu-code-*`; code blocks only (inline code untouched). */
+/* Code-block font via `--mu-code-*`; the family also applies to every other monospace span. */
 .mu-code-block {
     font-size: var(--mu-code-font-size, 90%);
     font-family: var(
@@ -933,7 +933,7 @@ pre.mu-active.mu-fenced-code::after {
 .mu-diagram-error {
     color: var(--editor-color-50);
     font-size: 14px;
-    font-family: monospace;
+    font-family: var(--mu-code-font-family, 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace);
     font-style: italic;
     text-align: center;
 }
@@ -1027,7 +1027,7 @@ pre.mu-active.mu-fenced-code::after {
     font-weight: 600;
     font-size: 14px;
 
-    font-family: monospace;
+    font-family: var(--mu-code-font-family, 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace);
 
     background: transparent;
 }

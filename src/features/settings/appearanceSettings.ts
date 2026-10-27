@@ -66,7 +66,7 @@ export const DEFAULT_APPEARANCE_TEXT_SETTINGS = {
   fontSize: 16,
   lineHeight: 1.6,
   editorLineWidth: '',
-  editorFontFamily: 'd2coding',
+  editorFontFamily: 'system',
   textDirection: 'ltr',
 } as const satisfies AppearanceTextSettings
 

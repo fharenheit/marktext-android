@@ -236,7 +236,7 @@ import {
   watchSystemColorScheme,
 } from './features/settings/themeRuntime'
 import { applySystemBarsForTheme } from './lib/systemBars'
-import { getEditingSettings } from './features/settings/editingSettings'
+import { getEditingSettings, resolveCodeFontFamily } from './features/settings/editingSettings'
 import {
   getAdvancedSettings,
   getAndroidMarkdownSettings,
@@ -331,6 +331,17 @@ const resolvedAppTheme = computed(() =>
   resolveAppTheme(appearanceThemeSettings.value, systemPrefersDark.value),
 )
 const editingSettings = computed(() => getEditingSettings(getValue))
+// Monospace text outside Muya (diffs, token fields) and the source editor
+// follow the font settings through root-level custom properties.
+watch(
+  () => [editingSettings.value.codeFontFamily, editingSettings.value.sourceFontFamily] as const,
+  ([codeFont, sourceFont]) => {
+    const root = document.documentElement.style
+    root.setProperty('--mt-mono-font', resolveCodeFontFamily(codeFont))
+    root.setProperty('--mt-source-font', resolveCodeFontFamily(sourceFont))
+  },
+  { immediate: true },
+)
 const toolbarSettings = computed(() => getEditorToolbarSettings(getValue))
 const selectionToolbarSettings = computed(() => getSelectionToolbarSettings(getValue))
 const documentSettings = computed(() => getDocumentSettings(getValue))

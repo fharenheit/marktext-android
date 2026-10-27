@@ -361,7 +361,7 @@ function submitGitHubToken() {
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
-  font-family: 'D2Coding Ligature', 'DejaVu Sans Mono', ui-monospace, monospace;
+  font-family: var(--mt-mono-font);
   font-size: 14px;
 }
 
@@ -377,7 +377,7 @@ function submitGitHubToken() {
 
 .cloud-browser-device-code {
   margin: 8px;
-  font-family: 'DejaVu Sans Mono', 'Roboto Mono', ui-monospace, monospace;
+  font-family: var(--mt-mono-font);
   font-size: 28px;
   font-weight: 700;
   letter-spacing: 0.12em;

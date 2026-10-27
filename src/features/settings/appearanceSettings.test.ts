@@ -13,7 +13,7 @@ describe('appearanceSettings', () => {
     const settings = getAppearanceTextSettings((_, defaultValue) => defaultValue)
 
     expect(settings).toEqual(DEFAULT_APPEARANCE_TEXT_SETTINGS)
-    expect(resolveEditorFontFamily(settings.editorFontFamily)).toContain('D2Coding Ligature')
+    expect(resolveEditorFontFamily(settings.editorFontFamily)).toContain('system-ui')
   })
 
   it('normalizes text setting values before applying them to runtime behavior', () => {

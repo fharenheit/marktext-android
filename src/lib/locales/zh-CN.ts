@@ -343,7 +343,8 @@ export const zhCN = {
   'settings.code.wrapLines': '自动换行',
   'settings.code.trimEmptyLines': '清理空行',
   'settings.code.fontSize': '字号',
-  'settings.code.font': '字体',
+  'settings.code.font': '等宽字体',
+  'settings.code.sourceFont': '源码编辑器字体',
   'settings.code.tabWidth': 'Tab 宽度',
 
   'settings.markdown.looseLists': '宽松列表',

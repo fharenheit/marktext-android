@@ -350,7 +350,8 @@ export const pt = {
   'settings.code.wrapLines': 'Quebrar linhas',
   'settings.code.trimEmptyLines': 'Remover linhas vazias',
   'settings.code.fontSize': 'Tamanho da fonte',
-  'settings.code.font': 'Fonte',
+  'settings.code.font': 'Fonte monoespaçada',
+  'settings.code.sourceFont': 'Fonte do editor de código-fonte',
   'settings.code.tabWidth': 'Largura da tabulação',
 
   'settings.markdown.looseLists': 'Listas soltas',

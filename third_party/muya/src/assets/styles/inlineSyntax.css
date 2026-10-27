@@ -79,7 +79,7 @@ code.mu-inline-rule {
 
     color: var(--editor-color);
     font-size: 0.8em;
-    font-family: 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace;
+    font-family: var(--mu-code-font-family, 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace);
 
     background-color: var(--code-block-bg-color);
     border-radius: 3px;
@@ -181,7 +181,7 @@ code.mu-inline-rule {
 }
 
 .mu-hard-line-break-space::after {
-    font-family: monospace;
+    font-family: var(--mu-code-font-family, 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace);
 
     opacity: 0.5;
 
@@ -209,7 +209,7 @@ code.mu-inline-rule {
     max-width: 100%;
 
     color: var(--editor-color);
-    font-family: monospace;
+    font-family: var(--mu-code-font-family, 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace);
     vertical-align: middle;
 }
 
@@ -276,7 +276,7 @@ div .mu-math-error,
 .mu-math > .mu-math-render.mu-math-error {
     color: var(--delete-color);
     font-size: 14px;
-    font-family: monospace;
+    font-family: var(--mu-code-font-family, 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace);
     font-style: italic;
 }
 
@@ -680,7 +680,7 @@ blockquote .mu-hide.mu-math > .mu-math-render {
 .mu-language {
     color: var(--editor-color-50);
     font-weight: 600;
-    font-family: monospace;
+    font-family: var(--mu-code-font-family, 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace);
     text-decoration: none;
 }
 
@@ -721,4 +721,9 @@ blockquote .mu-hide.mu-math > .mu-math-render {
 .mu-inline-footnote-identifier a {
     color: var(--editor-color);
     text-decoration: none;
+}
+
+/* Monospace elements from raw HTML (code, kbd, samp, pre) follow the code font; zero specificity keeps every Muya rule ahead. */
+:where(.mu-editor) :where(code, kbd, samp, pre, tt) {
+    font-family: var(--mu-code-font-family, 'DejaVu Sans Mono', 'Source Code Pro', 'Droid Sans Mono', Consolas, monospace);
 }
