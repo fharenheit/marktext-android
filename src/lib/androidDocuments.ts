@@ -102,9 +102,14 @@ export interface RenamedAndroidDocument {
 export interface AndroidWriteOptions {
   encoding: MarkdownEncoding
   writeBom?: boolean
+  /**
+   * Commit message for sources that save as commits (GitHub). Device
+   * files and other providers ignore it.
+   */
+  commitMessage?: string
 }
 
-export type AndroidCreateOptions = AndroidWriteOptions
+export type AndroidCreateOptions = Omit<AndroidWriteOptions, 'commitMessage'>
 export type AndroidReadOptions = Partial<AndroidMarkdownSettings>
 
 interface CanceledAndroidDocumentOpen {
@@ -412,6 +417,14 @@ export function getAndroidDocumentUserMessage(error: unknown) {
 
   if (code === 'CLOUD_WRITE_FAILED') {
     return 'Could not save this document to the cloud.'
+  }
+
+  if (code === 'CLOUD_WRITE_REJECTED') {
+    return 'GitHub rejected the commit, for example because the branch is protected. Save a copy instead.'
+  }
+
+  if (code === 'CLOUD_WRITE_FORBIDDEN') {
+    return 'This account cannot commit to this repository. Save a copy instead.'
   }
 
   if (code === 'CLOUD_NAME_EXISTS') {

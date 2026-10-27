@@ -63,6 +63,8 @@ const props = defineProps<{
   androidCanSaveCopy: boolean
   androidCanKeepRecovery: boolean
   androidSaving: boolean
+  canCommit: boolean
+  committing: boolean
   incomingOpenPromptOpen: boolean
   incomingOpenName: string
   textDirection: 'ltr' | 'rtl'
@@ -115,6 +117,7 @@ const emit = defineEmits<{
   'export-pdf': []
   'save-to-device': []
   'save-copy': []
+  commit: []
   'run-toolbar-command': [commandId: MobileCommandId, restoreRange: Range | null]
   'run-table-command': [commandId: TableCommandId]
   'run-selection-command': [commandId: SelectionToolbarCommandId, restoreRange: Range | null]
@@ -135,6 +138,7 @@ const emit = defineEmits<{
   'discard-local-draft': []
   'save-android-copy': []
   'keep-android-recovery': []
+  'commit-android-exit': []
   'discard-android-changes': []
   'keep-incoming': []
   'discard-incoming': []
@@ -673,6 +677,8 @@ onBeforeUnmount(() => {
         :can-export-pdf="canExportPdf"
         :can-save-to-device="canSaveToDevice"
         :can-save-copy="canSaveCopy"
+        :can-commit="canCommit"
+        :committing="committing"
         :sharing="sharing"
         :exporting-pdf="exportingPdf"
         :saving-to-device="savingToDevice"
@@ -684,6 +690,7 @@ onBeforeUnmount(() => {
         @export-pdf="emit('export-pdf')"
         @save-to-device="emit('save-to-device')"
         @save-copy="emit('save-copy')"
+        @commit="emit('commit')"
       />
     </Transition>
 
@@ -739,9 +746,11 @@ onBeforeUnmount(() => {
         :message="androidExitMessage"
         :can-save-copy="androidCanSaveCopy"
         :can-keep-recovery="androidCanKeepRecovery"
+        :can-commit="canCommit"
         :saving="androidSaving"
         @save-copy="emit('save-android-copy')"
         @keep-recovery="emit('keep-android-recovery')"
+        @commit="emit('commit-android-exit')"
         @discard="emit('discard-android-changes')"
       />
     </Transition>

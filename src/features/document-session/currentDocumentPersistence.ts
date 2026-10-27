@@ -79,6 +79,12 @@ export interface CurrentDocumentPersistenceOptions {
   canShareCurrentDocument: () => boolean
   canPersistLocalDrafts: () => boolean
   canPersistAndroidRecoveryDrafts: () => boolean
+  /**
+   * Sources whose saves are commits (GitHub): autosave and lifecycle
+   * flushes keep their edits as a recovery draft instead of writing, and
+   * only a save carrying a commit message reaches the source.
+   */
+  requiresExplicitCommit: (sourceUri: string) => boolean
   getTransientAndroidSaveMessage: () => string
   getAndroidEditorStatus: () => string
   getDraftLogStats: () => { characters: number, words: number, lines: number }
@@ -129,6 +135,8 @@ export interface CurrentDocumentPersistence {
    */
   saveDraft(): boolean
   saveAndroidDocument(options?: SaveAndroidDocumentOptions): Promise<boolean>
+  /** Commits the current document (commit-only sources) with the given message. */
+  commitCurrentDocument(message: string): Promise<boolean>
   saveLocalDraftToAndroidDocument(options?: { returnHomeAfterSave?: boolean }): Promise<boolean>
   saveAndroidDocumentCopy(options?: { returnHomeAfterSave?: boolean }): Promise<boolean>
   shareCurrentMarkdownDocument(): Promise<boolean>
@@ -141,6 +149,8 @@ export interface SaveAndroidDocumentOptions {
   waitForPendingSave?: boolean
   /** Let a caller that owns a fresher snapshot defer recovery persistence. */
   persistRecoveryDraftOnFailure?: boolean
+  /** Commit message; required to write sources that save as commits. */
+  commitMessage?: string
 }
 
 /**
@@ -277,6 +287,7 @@ export function createCurrentDocumentPersistence(
       markdown: value,
       canWrite: options.currentAndroidDocumentCanWrite.value,
       markdownSaveSettings: options.markdownSaveSettings.value,
+      commitMessage: saveOptions.commitMessage,
     })
 
     if (startResult.kind === 'not-android-document' || startResult.kind === 'clean') {
@@ -300,6 +311,13 @@ export function createCurrentDocumentPersistence(
       return startResult.saved
     }
 
+    if (
+      saveOptions.commitMessage === undefined
+      && options.requiresExplicitCommit(startResult.request.sourceUri)
+    ) {
+      return keepUncommittedEdits(startResult.request.sourceUri, startResult.request.saveMarkdown)
+    }
+
     if (activeAndroidSave) {
       if (saveOptions.waitForPendingSave) {
         await activeAndroidSave
@@ -310,8 +328,9 @@ export function createCurrentDocumentPersistence(
       return false
     }
 
+    const committing = saveOptions.commitMessage !== undefined
     options.documentState.value = startResult.request.savingDocument
-    options.status.value = startResult.status
+    options.status.value = committing ? 'Committing' : startResult.status
 
     const saveOperation = (async () => {
       const result = await saveAndroidDocumentWorkflow({
@@ -326,7 +345,7 @@ export function createCurrentDocumentPersistence(
       if (result.kind === 'saved') {
         options.documentState.value = result.savedDocument
         markAndroidRecentDocumentSaved(result.savedAt)
-        options.status.value = result.status
+        options.status.value = committing ? 'Committed' : result.status
         return true
       }
 
@@ -364,6 +383,19 @@ export function createCurrentDocumentPersistence(
         }
       }
     }
+  }
+
+  /**
+   * Autosave for a commit-only source: the edits stay dirty in the editor
+   * and durable as a recovery draft until the user commits them. Reports
+   * false (not saved) so leaving the editor asks what to do with them.
+   */
+  function keepUncommittedEdits(sourceUri: string, markdown: string) {
+    if (options.canPersistAndroidRecoveryDrafts()) {
+      persistAndroidRecoveryDraft(sourceUri, markdown)
+    }
+    options.status.value = 'Not committed'
+    return false
   }
 
   async function saveLocalDraftToAndroidDocument(
@@ -621,11 +653,21 @@ export function createCurrentDocumentPersistence(
     }
   }
 
+  async function commitCurrentDocument(message: string) {
+    const trimmed = message.trim()
+    if (trimmed.length === 0) {
+      return false
+    }
+    options.syncDocumentFromEditor(options.documentState.value.isDirty, true)
+    return saveAndroidDocument({ commitMessage: trimmed, waitForPendingSave: true })
+  }
+
   return {
     persistAndroidRecoveryDraft,
     removeAndroidRecoveryDraft,
     saveDraft,
     saveAndroidDocument,
+    commitCurrentDocument,
     saveLocalDraftToAndroidDocument,
     saveAndroidDocumentCopy,
     shareCurrentMarkdownDocument,

@@ -112,6 +112,7 @@ interface CloudDocumentsPlugin {
     encoding?: string
     writeBom?: boolean
     eTag?: string
+    commitMessage?: string
   }): Promise<CloudDocumentWriteResult>
   createCloudDocument(options: {
     provider: CloudProviderId
@@ -193,7 +194,7 @@ export async function writeCloudDocument(
   provider: CloudProviderId,
   fileId: string,
   markdown: string,
-  options: { encoding?: string; writeBom?: boolean; eTag?: string } = {},
+  options: { encoding?: string; writeBom?: boolean; eTag?: string; commitMessage?: string } = {},
 ) {
   return wrapCloudErrors(() =>
     CloudDocuments.writeCloudDocument({
@@ -203,6 +204,7 @@ export async function writeCloudDocument(
       encoding: options.encoding,
       writeBom: options.writeBom,
       eTag: options.eTag,
+      commitMessage: options.commitMessage,
     }),
   )
 }

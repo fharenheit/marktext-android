@@ -562,9 +562,7 @@ public class CloudDocumentsPlugin extends Plugin {
                     );
                     name = file.name;
                     versionTag = file.sha;
-                    // Read-only until commits land; edits stay recoverable
-                    // through the read-only document handling.
-                    canWrite = false;
+                    canWrite = file.canWrite;
                     bytes = file.bytes;
                     pathHint = location.describe();
                 } else if (auth == googleDriveAuth) {
@@ -630,7 +628,7 @@ public class CloudDocumentsPlugin extends Plugin {
         String encoding = MarkdownCodec.normalizeEncoding(call.getString("encoding", "utf8"));
         boolean writeBom = call.getBoolean("writeBom", false);
         ProviderAuth auth = requireDocumentProvider(call, provider);
-        if (auth == null || rejectReadOnlyProvider(call, auth)) {
+        if (auth == null || rejectCreateUnsupported(call, auth)) {
             return;
         }
         if (name.trim().length() == 0) {
@@ -698,8 +696,9 @@ public class CloudDocumentsPlugin extends Plugin {
         String eTag = call.getString("eTag", "");
         String encoding = MarkdownCodec.normalizeEncoding(call.getString("encoding", "utf8"));
         boolean writeBom = call.getBoolean("writeBom", false);
+        String commitMessage = call.getString("commitMessage", "").trim();
         ProviderAuth auth = requireDocumentProvider(call, provider);
-        if (auth == null || rejectReadOnlyProvider(call, auth)) {
+        if (auth == null) {
             return;
         }
         if (fileId.length() == 0) {
@@ -721,7 +720,21 @@ public class CloudDocumentsPlugin extends Plugin {
                 String name;
                 String versionTag;
                 String lastModified;
-                if (auth == googleDriveAuth) {
+                if (auth == githubAuth) {
+                    GitHubClient.Location location = GitHubClient.Location.parse(fileId);
+                    GitHubClient.CommitResult committed = githubClient.writeFile(
+                        tokens.accessToken,
+                        location,
+                        bytes,
+                        eTag,
+                        commitMessage.length() > 0
+                            ? commitMessage
+                            : "Update " + location.path
+                    );
+                    name = committed.name;
+                    versionTag = committed.sha;
+                    lastModified = committed.committedAt;
+                } else if (auth == googleDriveAuth) {
                     GoogleDriveClient.WriteResult written =
                         driveClient.writeFile(tokens.accessToken, fileId, bytes, eTag);
                     name = written.name;
@@ -768,12 +781,12 @@ public class CloudDocumentsPlugin extends Plugin {
         return null;
     }
 
-    /** GitHub documents open read-only until committing lands. */
-    private boolean rejectReadOnlyProvider(PluginCall call, ProviderAuth auth) {
+    /** Save-as cannot target GitHub yet: new files need a folder pick there. */
+    private boolean rejectCreateUnsupported(PluginCall call, ProviderAuth auth) {
         if (auth != githubAuth) {
             return false;
         }
-        call.reject("Saving to GitHub is not available yet", "CLOUD_OPERATION_UNSUPPORTED");
+        call.reject("Creating documents on GitHub is not available yet", "CLOUD_OPERATION_UNSUPPORTED");
         return true;
     }
 

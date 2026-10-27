@@ -646,13 +646,22 @@ export const en = {
   'cloudBrowser.loading': 'Loading…',
   'cloudBrowser.empty': 'No Markdown documents here',
   'cloudBrowser.retry': 'Try again',
-  'cloudBrowser.github.signInHint': 'Sign in with your GitHub account to open Markdown documents from your repositories. Documents open read-only for now.',
+  'cloudBrowser.github.signInHint': 'Sign in with your GitHub account to open Markdown documents from your repositories and commit your edits.',
   'cloudBrowser.github.connect': 'Sign in to GitHub',
   'cloudBrowser.github.deviceHint': 'Enter this code on GitHub to finish signing in:',
   'cloudBrowser.github.openVerification': 'Copy code and open GitHub',
   'cloudBrowser.github.waiting': 'Waiting for approval on GitHub…',
   'cloudBrowser.github.cancel': 'Cancel sign-in',
   'openLocations.githubSubtitle': 'Repositories, branches and Markdown files',
+  'app.status.notCommitted': 'Not committed',
+  'app.status.committing': 'Committing…',
+  'app.status.committed': 'Committed',
+  'editor.actions.commit': 'Commit to GitHub',
+  'editor.exit.githubUncommittedMessage': 'These edits are kept on this device but not committed to GitHub yet.',
+  'commit.title': 'Commit to GitHub',
+  'commit.body': 'Your edits are committed to the document’s branch.',
+  'commit.confirm': 'Commit',
+  'commit.defaultMessage': 'Update {name}',
 }
 
 export type I18nKey = keyof typeof en

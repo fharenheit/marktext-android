@@ -34,9 +34,11 @@ import { isCloudSourceUri } from './lib/cloudDocumentUris'
 import {
   createRoutedCloudDocument,
   readRoutedMarkdownDocument,
+  requiresExplicitCommit,
   toOpenedDocumentFromCloud,
   writeRoutedMarkdownDocument,
 } from './features/cloud-documents/cloudDocumentBridge'
+import GitHubCommitSheet from './features/cloud-documents/GitHubCommitSheet.vue'
 import OpenLocationsScreen from './features/open-locations/OpenLocationsScreen.vue'
 import CloudBrowserScreen from './features/open-locations/CloudBrowserScreen.vue'
 import CloudNameSheet from './features/open-locations/CloudNameSheet.vue'
@@ -524,6 +526,10 @@ function getAndroidEditorStatus() {
     return 'Read only'
   }
 
+  if (isCommitOnlyDocument() && documentState.value.isDirty) {
+    return 'Not committed'
+  }
+
   if (documentState.value.autosaveState === 'saving' || documentState.value.isDirty) {
     return 'Saving'
   }
@@ -533,6 +539,18 @@ function getAndroidEditorStatus() {
 
 function isLocalDraftDocument() {
   return documentState.value.autosaveTarget === 'local-draft'
+}
+
+/** GitHub documents: edits stay local until an explicit commit. */
+function isCommitOnlyDocument() {
+  return (
+    documentState.value.autosaveTarget === 'android-document'
+    && requiresExplicitCommit(documentState.value.sourceUri)
+  )
+}
+
+function canCommitCurrentDocument() {
+  return isCommitOnlyDocument() && currentAndroidDocumentCanWrite.value
 }
 
 function shouldShowLocalDraftRecord(id: string) {
@@ -1005,13 +1023,22 @@ function shouldPromptAndroidExitAfterSaveFailure() {
     documentState.value.autosaveTarget === 'android-document' &&
     documentState.value.isDirty &&
     hasDraftContent() &&
-    (documentState.value.autosaveState === 'save-failed' || !currentAndroidDocumentCanWrite.value)
+    (
+      documentState.value.autosaveState === 'save-failed'
+      || !currentAndroidDocumentCanWrite.value
+      // Autosave never commits, so leaving always asks about the edits.
+      || isCommitOnlyDocument()
+    )
   )
 }
 
 function getAndroidExitPromptMessage() {
   if (!currentAndroidDocumentCanWrite.value) {
     return t('editor.exit.androidReadOnlyMessage')
+  }
+
+  if (isCommitOnlyDocument() && documentState.value.autosaveState !== 'save-failed') {
+    return t('editor.exit.githubUncommittedMessage')
   }
 
   return t('editor.exit.androidSaveFailedMessage')
@@ -1425,6 +1452,7 @@ const {
   removeAndroidRecoveryDraft,
   saveDraft,
   saveAndroidDocument,
+  commitCurrentDocument,
   saveLocalDraftToAndroidDocument,
   saveAndroidDocumentCopy,
   shareCurrentMarkdownDocument,
@@ -1456,6 +1484,7 @@ const {
   canShareCurrentDocument,
   canPersistLocalDrafts,
   canPersistAndroidRecoveryDrafts,
+  requiresExplicitCommit,
   getTransientAndroidSaveMessage,
   getAndroidEditorStatus,
   getDraftLogStats: () => ({
@@ -1491,6 +1520,56 @@ const {
   documentLogger: androidDocumentLog,
   draftLogger: draftLog,
 })
+// --- GitHub commits: the only way edits of a commit-only document reach
+// the repository (autosave keeps them as a recovery draft meanwhile).
+
+const commitSheetOpen = ref(false)
+const committingDocument = ref(false)
+// Set when the commit was started from the leave-editor prompt: success
+// closes the editor, a cancel or failure returns to the prompt.
+let leaveEditorAfterCommit = false
+
+function openCommitSheet(leaveAfterCommit: boolean) {
+  closeEditorMenu()
+  androidExitPromptOpen.value = false
+  leaveEditorAfterCommit = leaveAfterCommit
+  commitSheetOpen.value = true
+}
+
+function getSuggestedCommitMessage() {
+  return t('commit.defaultMessage', { name: documentState.value.displayName })
+}
+
+async function confirmCommit(message: string) {
+  if (committingDocument.value) {
+    return
+  }
+  committingDocument.value = true
+  try {
+    const committed = await commitCurrentDocument(message)
+    commitSheetOpen.value = false
+    if (leaveEditorAfterCommit) {
+      if (committed) {
+        closeEditorToHome()
+      } else {
+        androidExitPromptOpen.value = true
+      }
+    }
+  } finally {
+    committingDocument.value = false
+  }
+}
+
+function cancelCommit() {
+  if (committingDocument.value) {
+    return
+  }
+  commitSheetOpen.value = false
+  if (leaveEditorAfterCommit) {
+    androidExitPromptOpen.value = true
+  }
+}
+
 function protectAndroidDocumentImportedImages(document: OpenedAndroidDocument) {
   if (!protectImportedImagesInAndroidDocument(document.markdown)) {
     androidDocumentLog.warn('imported image protection could not be updated', {
@@ -2578,6 +2657,7 @@ async function handleAppBackButton() {
     cloudBrowserAtRoot: cloudBrowserPath.value.length === 0,
     cloudBrowserSaveModeActive: cloudBrowserSaveModeActive.value,
     cloudNameSheetOpen: cloudNameSheetOpen.value,
+    commitSheetOpen: commitSheetOpen.value,
     googleDriveFolderPickActive: googleDrivePickingFolder.value,
     cloudSaveInProgress: cloudSaveInProgress.value !== null,
   })
@@ -2632,6 +2712,9 @@ async function handleAppBackButton() {
       return
     case 'cancel-save-destination':
       chooseSaveDestination(null)
+      return
+    case 'cancel-commit':
+      cancelCommit()
       return
     case 'cancel-cloud-name':
       resolveCloudDocumentName(null)
@@ -3052,6 +3135,8 @@ onBeforeUnmount(() => {
     :exporting-pdf="exportingPdfDocument"
     :saving-to-device="savingLocalDraftToAndroid"
     :saving-copy="savingAndroidDocumentCopy"
+    :can-commit="canCommitCurrentDocument() && documentState.isDirty"
+    :committing="committingDocument"
     :link-sheet-open="linkSheetOpen"
     :table-sheet-open="tableSheetOpen"
     :draft-exit-prompt-open="draftExitPromptOpen"
@@ -3116,6 +3201,8 @@ onBeforeUnmount(() => {
     @export-pdf="exportCurrentDocumentPdf"
     @save-to-device="saveLocalDraftToAndroidDocument"
     @save-copy="saveAndroidDocumentCopy"
+    @commit="openCommitSheet(false)"
+    @commit-android-exit="openCommitSheet(true)"
     @run-toolbar-command="runEditorToolbarCommand"
     @run-table-command="runEditorTableCommand"
     @run-selection-command="runEditorSelectionCommand"
@@ -3191,6 +3278,14 @@ onBeforeUnmount(() => {
       @save-here="handleCloudSaveHere"
     />
   </div>
+
+  <GitHubCommitSheet
+    v-if="commitSheetOpen"
+    :suggested-message="getSuggestedCommitMessage()"
+    :committing="committingDocument"
+    @confirm="confirmCommit"
+    @cancel="cancelCommit"
+  />
 
   <CloudNameSheet
     v-if="cloudNameSheetOpen"

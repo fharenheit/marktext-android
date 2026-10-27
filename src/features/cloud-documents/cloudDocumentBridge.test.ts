@@ -27,6 +27,7 @@ vi.mock('../../lib/androidDocuments', () => ({
 import {
   createRoutedCloudDocument,
   readRoutedMarkdownDocument,
+  requiresExplicitCommit,
   toOpenedDocumentFromCloud,
   writeRoutedMarkdownDocument,
 } from './cloudDocumentBridge'
@@ -68,7 +69,7 @@ describe('cloudDocumentBridge', () => {
     expect(opened.providerName).toBe('Google Drive')
   })
 
-  it('keeps a provider path hint and the read-only flag of GitHub documents', () => {
+  it('keeps a provider path hint and the write flag of GitHub documents', () => {
     const opened = toOpenedDocumentFromCloud('github', {
       ...CLOUD_CONTENT,
       fileId: 'octocat/hello/main/docs%2Fnotes.md',
@@ -199,6 +200,37 @@ describe('cloudDocumentBridge', () => {
       writeBom: undefined,
       eTag: 'etag-created',
     })
+  })
+
+  it('marks only GitHub sources as commit-only', () => {
+    expect(requiresExplicitCommit('cloud:github:o/r/main/a.md')).toBe(true)
+    expect(requiresExplicitCommit('cloud:onedrive:item-1')).toBe(false)
+    expect(requiresExplicitCommit('content://doc/1')).toBe(false)
+    expect(requiresExplicitCommit(null)).toBe(false)
+  })
+
+  it('forwards the commit message of a GitHub save with the read sha', async () => {
+    const fileId = 'o/r/main/a.md'
+    toOpenedDocumentFromCloud('github', { ...CLOUD_CONTENT, fileId, eTag: 'blob-1' })
+    writeCloudDocument.mockResolvedValue({
+      fileId,
+      displayName: 'a.md',
+      eTag: 'blob-2',
+      lastModified: '2026-10-27T01:00:00Z',
+    })
+
+    const saved = await writeRoutedMarkdownDocument(`cloud:github:${fileId}`, '# a', {
+      encoding: 'utf8',
+      commitMessage: 'Fix typo',
+    })
+
+    expect(writeCloudDocument).toHaveBeenCalledWith('github', fileId, '# a', {
+      encoding: 'utf8',
+      writeBom: undefined,
+      eTag: 'blob-1',
+      commitMessage: 'Fix typo',
+    })
+    expect(saved.providerName).toBe('GitHub')
   })
 
   it('passes non-cloud writes through to the SAF writer', async () => {

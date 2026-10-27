@@ -71,6 +71,7 @@ function createPersistence(overrides: {
   canPersistLocalDrafts?: boolean
   canPersistRecoveryDrafts?: boolean
   markdownSnapshot?: string
+  requiresExplicitCommit?: boolean
 } = {}) {
   const localDrafts = ref(overrides.drafts ?? [])
   const androidRecentDocuments = ref(overrides.androidDocuments ?? [])
@@ -106,6 +107,7 @@ function createPersistence(overrides: {
     canShareCurrentDocument: () => true,
     canPersistLocalDrafts: () => overrides.canPersistLocalDrafts ?? true,
     canPersistAndroidRecoveryDrafts: () => overrides.canPersistRecoveryDrafts ?? true,
+    requiresExplicitCommit: () => overrides.requiresExplicitCommit ?? false,
     getTransientAndroidSaveMessage: () => 'transient message',
     getAndroidEditorStatus: () => 'Saved',
     getDraftLogStats: () => ({ characters: 0, words: 0, lines: 0 }),
@@ -152,6 +154,80 @@ function createPersistence(overrides: {
 }
 
 describe('currentDocumentPersistence', () => {
+  describe('commit-only sources', () => {
+    it('keeps autosaved edits as a recovery draft instead of writing', async () => {
+      const { persistence, options } = createPersistence({
+        documentState: dirtyAndroidDocumentState(),
+        requiresExplicitCommit: true,
+      })
+
+      const saved = await persistence.saveAndroidDocument()
+
+      expect(saved).toBe(false)
+      expect(options.writeAndroidMarkdownDocument).not.toHaveBeenCalled()
+      expect(options.localDrafts.value[0]?.id).toBe(`android-recovery:${ANDROID_URI}`)
+      expect(options.localDrafts.value[0]?.markdown).toBe('# Original\n\nchanged')
+      expect(options.documentState.value.isDirty).toBe(true)
+      expect(options.status.value).toBe('Not committed')
+    })
+
+    it('treats lifecycle flushes like autosaves', async () => {
+      const { persistence, options } = createPersistence({
+        documentState: dirtyAndroidDocumentState(),
+        requiresExplicitCommit: true,
+      })
+
+      await persistence.flushCurrentDocument('pause')
+
+      expect(options.writeAndroidMarkdownDocument).not.toHaveBeenCalled()
+      expect(options.localDrafts.value).toHaveLength(1)
+    })
+
+    it('commits with the message and clears the recovery draft', async () => {
+      const { persistence, options } = createPersistence({
+        documentState: dirtyAndroidDocumentState(),
+        androidDocuments: [androidRecentRecord()],
+        requiresExplicitCommit: true,
+      })
+      await persistence.saveAndroidDocument()
+      expect(options.localDrafts.value).toHaveLength(1)
+
+      const committed = await persistence.commitCurrentDocument('  Fix typo  ')
+
+      expect(committed).toBe(true)
+      expect(options.writeAndroidMarkdownDocument).toHaveBeenCalledWith(
+        ANDROID_URI,
+        '# Original\n\nchanged',
+        expect.objectContaining({ commitMessage: 'Fix typo' }),
+      )
+      expect(options.documentState.value.isDirty).toBe(false)
+      expect(options.localDrafts.value).toHaveLength(0)
+      expect(options.status.value).toBe('Committed')
+    })
+
+    it('refuses an empty commit message', async () => {
+      const { persistence, options } = createPersistence({
+        documentState: dirtyAndroidDocumentState(),
+        requiresExplicitCommit: true,
+      })
+
+      expect(await persistence.commitCurrentDocument('   ')).toBe(false)
+      expect(options.writeAndroidMarkdownDocument).not.toHaveBeenCalled()
+    })
+
+    it('keeps the edits as a recovery draft when the commit fails', async () => {
+      const { persistence, options } = createPersistence({
+        documentState: dirtyAndroidDocumentState(),
+        requiresExplicitCommit: true,
+      })
+      options.writeAndroidMarkdownDocument.mockRejectedValueOnce(new Error('conflict'))
+
+      expect(await persistence.commitCurrentDocument('Fix typo')).toBe(false)
+      expect(options.documentState.value.autosaveState).toBe('save-failed')
+      expect(options.localDrafts.value[0]?.markdown).toBe('# Original\n\nchanged')
+    })
+  })
+
   it('autosaves a dirty local draft and reports the saved status', () => {
     const dirtyDraft = updateDocumentMarkdown(
       createUntitledDocument({ markdown: '', autosaveTarget: 'local-draft' }),

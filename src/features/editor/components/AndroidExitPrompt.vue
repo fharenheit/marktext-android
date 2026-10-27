@@ -7,11 +7,14 @@ defineProps<{
   message: string
   canSaveCopy: boolean
   canKeepRecovery: boolean
+  /** Uncommitted edits of a commit-only source: offer the commit first. */
+  canCommit?: boolean
   saving: boolean
 }>()
 
 const emit = defineEmits<{
   'save-copy': []
+  commit: []
   'keep-recovery': []
   discard: []
 }>()
@@ -37,8 +40,18 @@ const { onModalKeydown } = useModalFocus({ root: modalRoot })
       <p>{{ message }}</p>
       <div class="draft-save-actions">
         <button
-          v-if="canSaveCopy"
+          v-if="canCommit"
           class="primary-action"
+          type="button"
+          data-testid="prompt-commit-button"
+          :disabled="saving"
+          @click="emit('commit')"
+        >
+          {{ t('editor.actions.commit') }}
+        </button>
+        <button
+          v-if="canSaveCopy"
+          :class="{ 'primary-action': !canCommit }"
           type="button"
           data-testid="prompt-save-copy-button"
           :disabled="saving"

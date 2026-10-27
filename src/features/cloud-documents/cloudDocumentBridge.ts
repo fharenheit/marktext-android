@@ -17,6 +17,14 @@ import {
 import { buildCloudSourceUri, parseCloudSourceUri } from '../../lib/cloudDocumentUris'
 
 /**
+ * GitHub saves are commits: autosave must never write them, only an
+ * explicit commit with a message. Other sources save on every autosave.
+ */
+export function requiresExplicitCommit(sourceUri: string | null | undefined) {
+  return parseCloudSourceUri(sourceUri)?.provider === 'github'
+}
+
+/**
  * Last-seen version tag (OneDrive ETag / Drive headRevisionId / GitHub blob sha) per cloud
  * source URI, for conflict-checked writes. Process-lifetime is enough: a
  * document is always read before it can be saved, and a fresh read
@@ -137,6 +145,7 @@ export async function writeRoutedMarkdownDocument(
     encoding: options.encoding,
     writeBom: options.writeBom,
     eTag,
+    commitMessage: options.commitMessage,
   })
   cloudDocumentETags.set(sourceUri, written.eTag)
   return {

@@ -183,6 +183,15 @@ describe('appExitDecisions', () => {
     expect(getAppBackButtonAction(baseBackState)).toBe('exit-app')
   })
 
+  it('cancels the commit sheet before the editor prompts beneath it', () => {
+    expect(getAppBackButtonAction({
+      ...baseBackState,
+      currentScreen: 'editor',
+      commitSheetOpen: true,
+      androidExitPromptOpen: true,
+    })).toBe('cancel-commit')
+  })
+
   it('unwinds the save-as flow layers top-most first', () => {
     // Bare destination page: Back cancels the whole save.
     expect(getAppBackButtonAction({

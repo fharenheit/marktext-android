@@ -6,7 +6,7 @@ withDefaults(
   defineProps<{
     oneDriveState: CloudAccountState | null
     googleDriveState: CloudAccountState | null
-    /** Omitted on the save page: GitHub documents open read-only for now. */
+    /** Omitted on the save page: save-as cannot create GitHub documents yet. */
     githubState?: CloudAccountState | null
     /** Google flow feedback: browser trip / exchanging tokens / opening the pick. */
     googleDriveBusy: 'connecting' | 'completing' | 'opening' | null

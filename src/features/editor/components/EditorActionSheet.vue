@@ -8,6 +8,9 @@ defineProps<{
   canExportPdf: boolean
   canSaveToDevice: boolean
   canSaveCopy: boolean
+  /** Commit-only sources (GitHub): saving is an explicit commit. */
+  canCommit: boolean
+  committing: boolean
   sharing: boolean
   exportingPdf: boolean
   savingToDevice: boolean
@@ -21,6 +24,7 @@ const emit = defineEmits<{
   'export-pdf': []
   'save-to-device': []
   'save-copy': []
+  commit: []
   'toggle-source-mode': []
 }>()
 
@@ -65,6 +69,23 @@ const { onModalKeydown } = useModalFocus({
           <span class="editor-action-label">
             {{ sourceModeActive ? t('editor.actions.exitSourceMode') : t('editor.actions.sourceMode') }}
           </span>
+        </button>
+        <button
+          v-if="canCommit"
+          class="editor-action-row"
+          type="button"
+          role="menuitem"
+          data-testid="commit-document-button"
+          :disabled="committing"
+          @click="emit('commit')"
+        >
+          <span class="editor-action-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="3.4" />
+              <path d="M3 12h5.6M15.4 12H21" />
+            </svg>
+          </span>
+          <span class="editor-action-label">{{ t('editor.actions.commit') }}</span>
         </button>
         <button
           v-if="canShare"

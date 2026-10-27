@@ -34,6 +34,7 @@ export interface AppBackButtonState {
   cloudBrowserSaveModeActive?: boolean
   /** True while the save-as name sheet is open. */
   cloudNameSheetOpen?: boolean
+  commitSheetOpen?: boolean
   /** True while the save-as Drive folder pick waits on the browser trip. */
   googleDriveFolderPickActive?: boolean
   /** True while a cloud create is in flight; Back must not interrupt it. */
@@ -58,6 +59,7 @@ export type AppBackButtonAction =
   | 'cloud-browser-up'
   | 'cancel-save-destination'
   | 'cancel-cloud-name'
+  | 'cancel-commit'
   | 'cancel-google-folder-pick'
   | 'cancel-onedrive-folder-pick'
   | 'ignore-cloud-save'
@@ -112,6 +114,7 @@ export function getAppBackButtonAction({
   cloudBrowserAtRoot,
   cloudBrowserSaveModeActive,
   cloudNameSheetOpen,
+  commitSheetOpen,
   googleDriveFolderPickActive,
   cloudSaveInProgress,
 }: AppBackButtonState): AppBackButtonAction {
@@ -124,6 +127,12 @@ export function getAppBackButtonAction({
 
   if (cloudNameSheetOpen) {
     return 'cancel-cloud-name'
+  }
+
+  // The commit sheet sits above the editor and its prompts; a commit in
+  // flight still cancels only the sheet's chrome (the App ignores it).
+  if (commitSheetOpen) {
+    return 'cancel-commit'
   }
 
   if (googleDriveFolderPickActive) {

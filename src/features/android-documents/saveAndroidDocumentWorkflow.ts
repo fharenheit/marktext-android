@@ -30,6 +30,8 @@ export interface SaveAndroidDocumentWorkflowRequest {
   encoding: MarkdownEncoding
   writeBom: boolean
   saveMarkdown: string
+  /** Set for an explicit commit (GitHub); autosaves leave it undefined. */
+  commitMessage?: string
 }
 
 export type SaveAndroidDocumentWorkflowStartResult =
@@ -92,6 +94,7 @@ interface CreateSaveAndroidDocumentWorkflowStartOptions {
   markdown: string
   canWrite: boolean
   markdownSaveSettings?: MarkdownSaveSettings
+  commitMessage?: string
 }
 
 interface SaveAndroidDocumentWorkflowOptions {
@@ -100,7 +103,7 @@ interface SaveAndroidDocumentWorkflowOptions {
   writeAndroidMarkdownDocument: (
     sourceUri: string,
     markdown: string,
-    options: { encoding: MarkdownEncoding; writeBom: boolean },
+    options: { encoding: MarkdownEncoding; writeBom: boolean; commitMessage?: string },
   ) => Promise<unknown>
   getAndroidDocumentUserMessage: (error: unknown) => string
   recoveryMessage: string
@@ -113,6 +116,7 @@ function createSaveAndroidDocumentWorkflowRequest(
   markdown: string,
   sourceUri: string,
   markdownSaveSettings: MarkdownSaveSettings,
+  commitMessage: string | undefined,
 ): SaveAndroidDocumentWorkflowRequest {
   const nextDocument = updateDocumentMarkdown(documentState, markdown, {
     markDirty: documentState.isDirty,
@@ -125,6 +129,7 @@ function createSaveAndroidDocumentWorkflowRequest(
     encoding: markdownSaveSettings.encoding,
     writeBom: nextDocument.hasEncodingBom,
     saveMarkdown: nextDocument.markdown,
+    ...(commitMessage === undefined ? {} : { commitMessage }),
   }
 }
 
@@ -159,6 +164,7 @@ export function createSaveAndroidDocumentWorkflowStart({
   markdown,
   canWrite,
   markdownSaveSettings = DEFAULT_MARKDOWN_SAVE_SETTINGS,
+  commitMessage,
 }: CreateSaveAndroidDocumentWorkflowStartOptions): SaveAndroidDocumentWorkflowStartResult {
   if (documentState.autosaveTarget !== 'android-document') {
     return {
@@ -203,6 +209,7 @@ export function createSaveAndroidDocumentWorkflowStart({
       markdown,
       sourceUri,
       markdownSaveSettings,
+      commitMessage,
     ),
   }
 }
@@ -220,6 +227,7 @@ export async function saveAndroidDocumentWorkflow({
     await writeAndroidMarkdownDocument(request.sourceUri, request.markdownForSave, {
       encoding: request.encoding,
       writeBom: request.writeBom,
+      ...(request.commitMessage === undefined ? {} : { commitMessage: request.commitMessage }),
     })
     const savedAt = now()
     const currentDocument = getCurrentDocumentState()

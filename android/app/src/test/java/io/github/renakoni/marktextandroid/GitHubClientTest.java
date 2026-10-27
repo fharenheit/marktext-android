@@ -309,6 +309,7 @@ public class GitHubClientTest {
         transport.enqueue(200, "{\"type\":\"file\",\"name\":\"intro #1.md\","
             + "\"path\":\"guide/intro #1.md\",\"sha\":\"abc123\",\"size\":7}");
         transport.enqueue(200, "# Hello");
+        transport.enqueue(200, "{\"permissions\":{\"pull\":true,\"push\":false}}");
 
         GitHubClient.FileContent file = new GitHubClient(transport).readFile(
             "TOKEN",
@@ -326,6 +327,99 @@ public class GitHubClientTest {
         assertEquals(expectedUrl, raw.url);
         assertEquals("application/vnd.github.raw", raw.headers.get("Accept"));
         assertEquals(1024, raw.maxResponseBytes);
+        assertFalse(file.canWrite);
+        assertEquals("https://api.github.com/repos/octocat/hello", transport.requests.get(2).url);
+    }
+
+    @Test
+    public void readTreatsMissingPermissionsAsWritable() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.enqueue(200, "{\"type\":\"file\",\"name\":\"a.md\",\"path\":\"a.md\",\"sha\":\"s\",\"size\":1}");
+        transport.enqueue(200, "x");
+        transport.enqueue(200, "{\"full_name\":\"o/r\"}");
+
+        assertTrue(new GitHubClient(transport)
+            .readFile("TOKEN", GitHubClient.Location.parse("o/r/main/a.md"), 1024).canWrite);
+    }
+
+    @Test
+    public void commitPutsBase64ContentWithShaBranchAndMessage() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.enqueue(200, "{\"content\":{\"name\":\"a b.md\",\"path\":\"docs/a b.md\",\"sha\":\"new-sha\"},"
+            + "\"commit\":{\"sha\":\"c0ffee\",\"committer\":{\"date\":\"2026-10-27T01:00:00Z\"}}}");
+
+        GitHubClient.CommitResult result = new GitHubClient(transport).writeFile(
+            "TOKEN",
+            GitHubClient.Location.parse("octocat/hello/feature%2Fx/docs%2Fa%20b.md"),
+            "# Hi \u00e9".getBytes(StandardCharsets.UTF_8),
+            "old-sha",
+            "Update \"a b.md\""
+        );
+
+        assertEquals("a b.md", result.name);
+        assertEquals("new-sha", result.sha);
+        assertEquals("c0ffee", result.commitSha);
+        assertEquals("2026-10-27T01:00:00Z", result.committedAt);
+        HttpTransport.Request request = transport.requests.get(0);
+        assertEquals("PUT", request.method);
+        assertEquals("https://api.github.com/repos/octocat/hello/contents/docs/a%20b.md", request.url);
+        assertEquals("Bearer TOKEN", request.headers.get("Authorization"));
+        assertEquals("application/json", request.headers.get("Content-Type"));
+        org.json.JSONObject body = new org.json.JSONObject(bodyOf(request));
+        assertEquals("Update \"a b.md\"", body.getString("message"));
+        assertEquals("old-sha", body.getString("sha"));
+        assertEquals("feature/x", body.getString("branch"));
+        assertEquals(
+            java.util.Base64.getEncoder().encodeToString("# Hi \u00e9".getBytes(StandardCharsets.UTF_8)),
+            body.getString("content")
+        );
+    }
+
+    @Test
+    public void commitRequiresTheBaselineSha() throws Exception {
+        FakeTransport transport = new FakeTransport();
+
+        assertFailsWith("CLOUD_DOCUMENT_CONFLICT", () -> new GitHubClient(transport).writeFile(
+            "T", GitHubClient.Location.parse("o/r/main/a.md"), new byte[0], "", "m"));
+        assertTrue(transport.requests.isEmpty());
+    }
+
+    @Test
+    public void commitFailuresMapToStableCodes() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.enqueue(409, "{\"message\":\"docs/a.md does not match 1234\"}");
+        transport.enqueue(409, "{\"message\":\"is at abc but expected def\"}");
+        transport.enqueue(409, "{\"message\":\"Repository rule violations found\\n\\nChanges must be made through a pull request.\"}");
+        transport.enqueue(422, "{\"message\":\"Invalid request.\"}");
+        transport.enqueue(404, "{\"message\":\"Not Found\"}");
+        transport.enqueue(403, "{\"message\":\"Resource not accessible by integration\"}");
+        transport.enqueue(401, "{}");
+        GitHubClient client = new GitHubClient(transport);
+        GitHubClient.Location file = GitHubClient.Location.parse("o/r/main/a.md");
+
+        assertFailsWith("CLOUD_DOCUMENT_CONFLICT", () -> client.writeFile("T", file, new byte[0], "s", "m"));
+        assertFailsWith("CLOUD_DOCUMENT_CONFLICT", () -> client.writeFile("T", file, new byte[0], "s", "m"));
+        try {
+            client.writeFile("T", file, new byte[0], "s", "m");
+            fail("Expected CLOUD_WRITE_REJECTED");
+        } catch (CloudProviderException ex) {
+            assertEquals("CLOUD_WRITE_REJECTED", ex.code);
+            assertEquals("GitHub rejected the commit: Repository rule violations found", ex.getMessage());
+        }
+        assertFailsWith("CLOUD_WRITE_REJECTED", () -> client.writeFile("T", file, new byte[0], "s", "m"));
+        assertFailsWith("CLOUD_WRITE_FORBIDDEN", () -> client.writeFile("T", file, new byte[0], "s", "m"));
+        assertFailsWith("CLOUD_WRITE_FORBIDDEN", () -> client.writeFile("T", file, new byte[0], "s", "m"));
+        assertFailsWith("CLOUD_AUTH_EXPIRED", () -> client.writeFile("T", file, new byte[0], "s", "m"));
+    }
+
+    @Test
+    public void base64MatchesTheJdkEncoderForEveryPaddingLength() {
+        java.util.Random random = new java.util.Random(7);
+        for (int length = 0; length < 64; length++) {
+            byte[] bytes = new byte[length];
+            random.nextBytes(bytes);
+            assertEquals(java.util.Base64.getEncoder().encodeToString(bytes), GitHubClient.base64(bytes));
+        }
     }
 
     @Test
