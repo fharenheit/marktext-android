@@ -230,3 +230,64 @@ Inline image: ![App icon](${appIconUrl})
   await expect(editor.locator('.mu-inline-image img[alt="App icon"]')).toHaveCount(1)
   await expect.poll(() => editor.locator('.mu-inline-image.mu-image-success').count()).toBeGreaterThan(0)
 })
+
+test('renders SVG in every Markdown form and keeps the source', async ({ page }) => {
+  const svgDataUrl = `data:image/svg+xml;base64,${Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#393"/></svg>',
+  ).toString('base64')}`
+  const markdown = `# SVG Matrix
+
+Inline: <svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><circle class="inline-probe" cx="20" cy="20" r="18" fill="#c98a4b"/></svg>
+
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40">
+  <circle class="block-probe" cx="20" cy="20" r="18" fill="#4c8492"/>
+</svg>
+
+Image: ![svg](${svgDataUrl})
+`
+
+  await openLocalDraft(page, {
+    id: 'markdown-rendering-draft',
+    markdown,
+    title: /SVG Matrix/,
+    now: '2026-07-01T10:00:00.000Z',
+  })
+
+  const editor = page.getByTestId('editor-host')
+  // A single-line <svg> inside a paragraph draws its child shapes too, not
+  // just an empty <svg> element.
+  const inlineCircle = editor.locator('.mu-inline-svg-render circle.inline-probe')
+  await expect(inlineCircle).toHaveCount(1)
+  await expect.poll(async () => (await inlineCircle.boundingBox())?.width ?? 0).toBeGreaterThan(30)
+  await expect(editor.locator('.mu-html-preview circle.block-probe')).toHaveCount(1)
+  await expect.poll(() => editor.locator('.mu-inline-image.mu-image-success').count()).toBe(1)
+  await expect.poll(() => getStoredDraftMarkdown(page)).toBe(markdown)
+})
+
+test('renders the common Mermaid diagram types', async ({ page }) => {
+  const diagrams = [
+    'graph TD\n  A[Start] --> B{Ok?}\n  B -->|yes| C[Done]',
+    'sequenceDiagram\n  Alice->>Bob: Hello',
+    'classDiagram\n  Animal <|-- Duck',
+    'stateDiagram-v2\n  [*] --> Still\n  Still --> Moving',
+    'gantt\n  dateFormat YYYY-MM-DD\n  section A\n  Task :a1, 2026-01-01, 3d',
+    'pie title Pets\n  "Dogs" : 40\n  "Cats" : 60',
+    'erDiagram\n  CUSTOMER ||--o{ ORDER : places',
+    'mindmap\n  root((MarkText))\n    Android',
+  ]
+  const markdown = `# Mermaid Matrix\n\n${diagrams.map(body => `\`\`\`mermaid\n${body}\n\`\`\`\n`).join('\n')}`
+
+  await openLocalDraft(page, {
+    id: 'markdown-rendering-draft',
+    markdown,
+    title: /Mermaid Matrix/,
+    now: '2026-07-01T10:00:00.000Z',
+  })
+
+  const editor = page.getByTestId('editor-host')
+  await expect(editor.locator('.mu-diagram-block')).toHaveCount(diagrams.length)
+  await expect
+    .poll(() => editor.locator('.mu-diagram-preview svg').count(), { timeout: 45000 })
+    .toBe(diagrams.length)
+  await expect(editor.locator('.mu-diagram-error')).toHaveCount(0)
+})

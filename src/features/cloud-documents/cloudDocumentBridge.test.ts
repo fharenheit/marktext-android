@@ -25,6 +25,7 @@ vi.mock('../../lib/androidDocuments', () => ({
 }))
 
 import {
+  commitRoutedCloudDocumentToNewBranch,
   createRoutedCloudDocument,
   readRoutedMarkdownDocument,
   requiresExplicitCommit,
@@ -231,6 +232,76 @@ describe('cloudDocumentBridge', () => {
       commitMessage: 'Fix typo',
     })
     expect(saved.providerName).toBe('GitHub')
+  })
+
+  it('commits device images along with a GitHub document', async () => {
+    const fileId = 'o/r/main/docs%2Fa.md'
+    toOpenedDocumentFromCloud('github', { ...CLOUD_CONTENT, fileId, eTag: 'blob-1' })
+    writeCloudDocument.mockResolvedValue({ fileId, displayName: 'a.md', eTag: 'blob-2', lastModified: '' })
+
+    await writeRoutedMarkdownDocument(
+      `cloud:github:${fileId}`,
+      '![shot](marktext-image://local/1-abc-shot.png)',
+      { encoding: 'utf8', commitMessage: 'Add shot' },
+    )
+
+    expect(writeCloudDocument).toHaveBeenCalledWith('github', fileId, '![shot](images/1-abc-shot.png)', {
+      encoding: 'utf8',
+      writeBom: undefined,
+      eTag: 'blob-1',
+      commitMessage: 'Add shot',
+      localImages: [{ name: '1-abc-shot.png', path: 'docs/images/1-abc-shot.png' }],
+    })
+  })
+
+  it('commits to a new branch and continues on the branch copy', async () => {
+    const fileId = 'o/r/main/docs%2Fa.md'
+    toOpenedDocumentFromCloud('github', { ...CLOUD_CONTENT, fileId, eTag: 'blob-1' })
+    writeCloudDocument.mockResolvedValue({
+      fileId: 'o/r/marktext%2Ffix/docs%2Fa.md',
+      displayName: 'a.md',
+      eTag: 'blob-2',
+      lastModified: '',
+      pullRequestNumber: 7,
+      pullRequestUrl: 'https://github.com/o/r/pull/7',
+    })
+
+    const result = await commitRoutedCloudDocumentToNewBranch(`cloud:github:${fileId}`, '# a', {
+      encoding: 'utf8',
+      writeBom: false,
+      commitMessage: 'Fix',
+      branch: 'marktext/fix',
+      openPullRequest: true,
+    })
+
+    expect(writeCloudDocument).toHaveBeenCalledWith('github', fileId, '# a', expect.objectContaining({
+      eTag: 'blob-1',
+      newBranch: 'marktext/fix',
+      openPullRequest: true,
+      commitMessage: 'Fix',
+    }))
+    expect(result.document.sourceUri).toBe('cloud:github:o/r/marktext%2Ffix/docs%2Fa.md')
+    expect(result.document.pathHint).toBe('o/r@marktext/fix/docs/a.md')
+    expect(result.document.markdown).toBe('# a')
+    expect(result.pullRequest).toEqual({ number: 7, url: 'https://github.com/o/r/pull/7' })
+
+    // The next commit on the branch copy uses the sha the branch commit returned.
+    writeCloudDocument.mockResolvedValue({ fileId: 'o/r/marktext%2Ffix/docs%2Fa.md', displayName: 'a.md', eTag: 'blob-3', lastModified: '' })
+    await writeRoutedMarkdownDocument(result.document.sourceUri!, '# b', { encoding: 'utf8', commitMessage: 'More' })
+    expect(writeCloudDocument).toHaveBeenLastCalledWith(
+      'github',
+      'o/r/marktext%2Ffix/docs%2Fa.md',
+      '# b',
+      expect.objectContaining({ eTag: 'blob-2' }),
+    )
+  })
+
+  it('refuses new-branch commits for other providers', async () => {
+    await expect(
+      commitRoutedCloudDocumentToNewBranch('cloud:onedrive:item-1', '# a', {
+        encoding: 'utf8', writeBom: false, commitMessage: 'm', branch: 'b', openPullRequest: false,
+      }),
+    ).rejects.toMatchObject({ code: 'CLOUD_OPERATION_UNSUPPORTED' })
   })
 
   it('passes non-cloud writes through to the SAF writer', async () => {

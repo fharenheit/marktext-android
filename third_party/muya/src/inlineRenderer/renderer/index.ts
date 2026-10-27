@@ -24,6 +24,7 @@ import highlight from './highlight';
 import hr from './hr';
 import htmlEscape from './htmlEscape';
 import htmlRuby from './htmlRuby';
+import htmlSvg from './htmlSvg';
 import htmlTag from './htmlTag';
 import image from './image';
 import inlineCode from './inlineCode';
@@ -68,6 +69,7 @@ const inlineSyntaxRenderer = {
     multipleMath,
     referenceDefinition,
     htmlRuby,
+    htmlSvg,
     referenceLink,
     referenceImage,
     superSubScript,

@@ -24,7 +24,7 @@ final class UrlConnectionTransport implements HttpTransport {
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(20_000);
             connection.setReadTimeout(30_000);
-            connection.setRequestMethod(request.method);
+            setRequestMethod(connection, request.method);
             for (Map.Entry<String, String> header : request.headers.entrySet()) {
                 connection.setRequestProperty(header.getKey(), header.getValue());
             }
@@ -66,6 +66,25 @@ final class UrlConnectionTransport implements HttpTransport {
             return new Response(status, headers, body.toByteArray());
         } finally {
             connection.disconnect();
+        }
+    }
+
+    /**
+     * Android's OkHttp-backed connection accepts PATCH (GitHub's ref
+     * update needs it); the plain java.net implementation does not, so fall
+     * back to setting the method field directly there.
+     */
+    private static void setRequestMethod(HttpURLConnection connection, String method) throws IOException {
+        try {
+            connection.setRequestMethod(method);
+        } catch (java.net.ProtocolException ex) {
+            try {
+                java.lang.reflect.Field field = HttpURLConnection.class.getDeclaredField("method");
+                field.setAccessible(true);
+                field.set(connection, method);
+            } catch (ReflectiveOperationException | RuntimeException reflectionFailure) {
+                throw ex;
+            }
         }
     }
 }

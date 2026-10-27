@@ -530,6 +530,32 @@ describe('currentDocumentPersistence', () => {
     expect(options.localDrafts.value).toEqual([])
   })
 
+  it('saves through a caller-supplied create function and continues on its document', async () => {
+    const branchDocument: OpenedAndroidDocument = {
+      ...createdDocument,
+      sourceUri: 'cloud:github:o/r/marktext%2Ffix/a.md',
+      displayName: 'a.md',
+      providerName: 'GitHub',
+    }
+    const createDocument = vi.fn().mockResolvedValue(branchDocument)
+    const { persistence, options } = createPersistence({
+      documentState: dirtyAndroidDocumentState(),
+      androidDocuments: [androidRecentRecord()],
+    })
+
+    const saved = await persistence.saveAndroidDocumentCopy({ createDocument })
+
+    expect(saved).toBe(true)
+    expect(createDocument).toHaveBeenCalledWith(
+      '# Original\n\nchanged',
+      expect.any(String),
+      expect.objectContaining({ encoding: 'utf8' }),
+    )
+    expect(options.createAndroidMarkdownDocument).not.toHaveBeenCalled()
+    expect(options.documentState.value.sourceUri).toBe('cloud:github:o/r/marktext%2Ffix/a.md')
+    expect(options.documentState.value.isDirty).toBe(false)
+  })
+
   it('shares the current document and restores the busy flag', async () => {
     const { persistence, options } = createPersistence({
       documentState: dirtyAndroidDocumentState(),

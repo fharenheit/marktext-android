@@ -38,11 +38,15 @@ import type { GitHubDocumentLink } from './features/cloud-documents/githubLinks'
 import {
   createRoutedCloudDocument,
   readRoutedMarkdownDocument,
+  commitRoutedCloudDocumentToNewBranch,
   requiresExplicitCommit,
   toOpenedDocumentFromCloud,
+  type NewBranchCommitResult,
   writeRoutedMarkdownDocument,
 } from './features/cloud-documents/cloudDocumentBridge'
 import GitHubCommitSheet from './features/cloud-documents/GitHubCommitSheet.vue'
+import GitHubPullRequestSheet from './features/cloud-documents/GitHubPullRequestSheet.vue'
+import { suggestBranchName } from './features/cloud-documents/githubBranches'
 import OpenLocationsScreen from './features/open-locations/OpenLocationsScreen.vue'
 import CloudBrowserScreen from './features/open-locations/CloudBrowserScreen.vue'
 import CloudNameSheet from './features/open-locations/CloudNameSheet.vue'
@@ -51,6 +55,7 @@ import {
   formatImportedImageStorageBytes,
   getAndroidImageUserMessage,
   isAndroidImageImportAvailable,
+  collectMarkTextLocalImageFileNames,
   pickAndroidImageDocument,
   setDocumentImageResolver,
   type ImportedAndroidImageCleanupResult,
@@ -1528,6 +1533,7 @@ const {
 // Relative images of a GitHub document load from its repository through
 // the native image endpoint (private repositories included). Synchronous,
 // so the resolver is in place before the opened document first renders.
+let githubImageContextFileId: string | null = null
 watch(
   () => documentState.value.sourceUri,
   sourceUri => {
@@ -1538,6 +1544,12 @@ watch(
         ? null
         : source => resolveGitHubImageSource(source, fileId, window.location.origin),
     )
+    // The native scope only changes with the GitHub document; switching
+    // between other documents needs no bridge round trip.
+    if (fileId === githubImageContextFileId) {
+      return
+    }
+    githubImageContextFileId = fileId
     if (isCloudDocumentAccessAvailable()) {
       setCloudImageContext('github', fileId).catch(error => {
         androidDocumentLog.warn('GitHub image context update failed', { error })
@@ -1567,13 +1579,72 @@ function getSuggestedCommitMessage() {
   return t('commit.defaultMessage', { name: documentState.value.displayName })
 }
 
-async function confirmCommit(message: string) {
+function getSuggestedCommitBranch() {
+  return suggestBranchName(documentState.value.displayName)
+}
+
+function getCommitImageCount() {
+  return collectMarkTextLocalImageFileNames(documentState.value.markdown).length
+}
+
+// Shown after a commit to a new branch: the pull request (or why it is
+// missing), with a way to open it on GitHub.
+const pullRequestResult = ref<{
+  branch: string
+  pullRequest: { number: number; url: string } | null
+  error: string | null
+} | null>(null)
+
+/**
+ * Commits to a new branch through the save-as path: the branch copy becomes
+ * the open document (recents, version tag, later commits), exactly like a
+ * saved copy, and the original's recovery draft is retired.
+ */
+async function commitCurrentDocumentToNewBranch(message: string, branch: string) {
+  const sourceUri = documentState.value.sourceUri
+  if (!sourceUri) {
+    return false
+  }
+  const outcome: { result: NewBranchCommitResult | null } = { result: null }
+  const saved = await saveAndroidDocumentCopy({
+    createDocument: async (markdown, _suggestedName, options) => {
+      outcome.result = await commitRoutedCloudDocumentToNewBranch(sourceUri, markdown, {
+        ...options,
+        commitMessage: message,
+        branch,
+        openPullRequest: true,
+      })
+      return outcome.result.document
+    },
+  })
+  if (saved && outcome.result) {
+    status.value = 'Committed'
+    pullRequestResult.value = {
+      branch,
+      pullRequest: outcome.result.pullRequest,
+      error: outcome.result.pullRequestError,
+    }
+  }
+  return saved
+}
+
+async function openPullRequestOnGitHub() {
+  const url = pullRequestResult.value?.pullRequest?.url
+  pullRequestResult.value = null
+  if (url) {
+    await openExternalUrl(url)
+  }
+}
+
+async function confirmCommit(commit: { message: string; newBranch: string | null }) {
   if (committingDocument.value) {
     return
   }
   committingDocument.value = true
   try {
-    const committed = await commitCurrentDocument(message)
+    const committed = commit.newBranch
+      ? await commitCurrentDocumentToNewBranch(commit.message, commit.newBranch)
+      : await commitCurrentDocument(commit.message)
     commitSheetOpen.value = false
     if (leaveEditorAfterCommit) {
       if (committed) {
@@ -1588,6 +1659,10 @@ async function confirmCommit(message: string) {
 }
 
 function cancelCommit() {
+  if (pullRequestResult.value !== null) {
+    pullRequestResult.value = null
+    return
+  }
   if (committingDocument.value) {
     return
   }
@@ -2691,7 +2766,7 @@ async function handleAppBackButton() {
     cloudBrowserAtRoot: cloudBrowserPath.value.length === 0,
     cloudBrowserSaveModeActive: cloudBrowserSaveModeActive.value,
     cloudNameSheetOpen: cloudNameSheetOpen.value,
-    commitSheetOpen: commitSheetOpen.value,
+    commitSheetOpen: commitSheetOpen.value || pullRequestResult.value !== null,
     googleDriveFolderPickActive: googleDrivePickingFolder.value,
     cloudSaveInProgress: cloudSaveInProgress.value !== null,
   })
@@ -3317,9 +3392,20 @@ onBeforeUnmount(() => {
   <GitHubCommitSheet
     v-if="commitSheetOpen"
     :suggested-message="getSuggestedCommitMessage()"
+    :suggested-branch="getSuggestedCommitBranch()"
+    :image-count="getCommitImageCount()"
     :committing="committingDocument"
     @confirm="confirmCommit"
     @cancel="cancelCommit"
+  />
+
+  <GitHubPullRequestSheet
+    v-if="pullRequestResult"
+    :branch="pullRequestResult.branch"
+    :pull-request="pullRequestResult.pullRequest"
+    :error="pullRequestResult.error"
+    @open="openPullRequestOnGitHub"
+    @close="pullRequestResult = null"
   />
 
   <CloudNameSheet

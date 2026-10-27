@@ -160,6 +160,15 @@ export default function htmlTag(
             if (!closeTag) {
                 return [h(`span.${CLASS_NAMES.MU_HTML_TAG}`, openContent)];
             }
+            else if (tag === 'svg' && !this.muya.options.disableHtml) {
+                return this.htmlSvg({
+                    h,
+                    cursor,
+                    block,
+                    token,
+                    outerClass,
+                });
+            }
             else if (tag === 'ruby') {
                 return this.htmlRuby({
                     h,

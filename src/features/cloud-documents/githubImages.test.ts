@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveGitHubImageSource } from './githubImages'
+import { prepareLocalImagesForCommit, resolveGitHubImageSource } from './githubImages'
 
 const ORIGIN = 'https://localhost'
 const DOCUMENT = 'octocat/hello/feature%2Fx/docs%2Fguide%2FREADME.md'
@@ -39,5 +39,43 @@ describe('resolveGitHubImageSource', () => {
 
   it('needs a file-level document id', () => {
     expect(resolveGitHubImageSource('a.png', 'octocat/hello/main', ORIGIN)).toBeNull()
+  })
+})
+
+describe('prepareLocalImagesForCommit', () => {
+  it('rewrites device images to the images folder next to the document', () => {
+    const markdown = [
+      '![a](marktext-image://local/1-abc-shot.png)',
+      '![again](marktext-image://local/1-abc-shot.png)',
+      '<img src="marktext-image://local/2-def-photo.jpeg">',
+      '![remote](https://example.com/x.png)',
+    ].join('\n')
+
+    const prepared = prepareLocalImagesForCommit(markdown, DOCUMENT)
+
+    expect(prepared.markdown).toBe([
+      '![a](images/1-abc-shot.png)',
+      '![again](images/1-abc-shot.png)',
+      '<img src="images/2-def-photo.jpeg">',
+      '![remote](https://example.com/x.png)',
+    ].join('\n'))
+    expect(prepared.images).toEqual([
+      { name: '1-abc-shot.png', path: 'docs/guide/images/1-abc-shot.png' },
+      { name: '2-def-photo.jpeg', path: 'docs/guide/images/2-def-photo.jpeg' },
+    ])
+  })
+
+  it('uses the repository root folder for root documents and skips odd names', () => {
+    const prepared = prepareLocalImagesForCommit(
+      '![a](marktext-image://local/ok.png) ![b](marktext-image://local/..hidden.png)',
+      'o/r/main/README.md',
+    )
+
+    expect(prepared.images).toEqual([{ name: 'ok.png', path: 'images/ok.png' }])
+    expect(prepared.markdown).toBe('![a](images/ok.png) ![b](marktext-image://local/..hidden.png)')
+  })
+
+  it('leaves documents without device images untouched', () => {
+    expect(prepareLocalImagesForCommit('# Plain', DOCUMENT)).toEqual({ markdown: '# Plain', images: [] })
   })
 })

@@ -109,6 +109,29 @@ final class GitHubClient {
         }
     }
 
+    /** One extra file of a multi-file commit, e.g. an image added on the device. */
+    static final class FileChange {
+
+        final String path;
+        final byte[] bytes;
+
+        FileChange(String path, byte[] bytes) {
+            this.path = path;
+            this.bytes = bytes;
+        }
+    }
+
+    static final class PullRequest {
+
+        final int number;
+        final String htmlUrl;
+
+        PullRequest(int number, String htmlUrl) {
+            this.number = number;
+            this.htmlUrl = htmlUrl;
+        }
+    }
+
     static final class CommitResult {
 
         final String name;
@@ -670,6 +693,271 @@ final class GitHubClient {
             commit == null ? "" : commit.optString("sha", ""),
             committer == null ? "" : committer.optString("date", "")
         );
+    }
+
+    /**
+     * Commits the document plus extra files (images added on the device) as
+     * ONE commit through the Git Data API: blobs, a tree on top of the
+     * branch head, a commit, and a non-forced ref update. The document's
+     * blob at the head must still be the one it was read at, and the ref
+     * update refuses to move if the branch advanced meanwhile — either way
+     * the result is CLOUD_DOCUMENT_CONFLICT rather than lost work.
+     */
+    CommitResult commitFiles(
+        String accessToken,
+        Location document,
+        byte[] documentBytes,
+        String expectedSha,
+        List<FileChange> extraFiles,
+        String message
+    ) throws IOException, CloudProviderException {
+        if (document.ref == null || document.path.length() == 0) {
+            throw new CloudProviderException("INVALID_CLOUD_FILE_ID", "The GitHub location is not a file");
+        }
+        if (expectedSha == null || expectedSha.length() == 0) {
+            throw new CloudProviderException(
+                "CLOUD_DOCUMENT_CONFLICT",
+                "This document must be reopened before it can be committed"
+            );
+        }
+        for (FileChange change : extraFiles) {
+            // Same validation as browser ids: no dot or empty segments.
+            Location.parse(new Location(document.owner, document.repo, document.ref, change.path).serialize());
+        }
+
+        String headSha = getBranchHead(accessToken, document.owner, document.repo, document.ref);
+        Location atHead = new Location(document.owner, document.repo, headSha, document.path);
+        JSONObject current = apiJson(accessToken, contentsUrl(atHead));
+        if (!expectedSha.equals(current.optString("sha", ""))) {
+            throw new CloudProviderException(
+                "CLOUD_DOCUMENT_CONFLICT",
+                "This document changed on GitHub since it was opened"
+            );
+        }
+        String repoUrl = API + "/repos/" + document.owner + "/" + document.repo;
+        JSONObject headCommit = apiJson(accessToken, repoUrl + "/git/commits/" + headSha);
+        JSONObject headTree = headCommit.optJSONObject("tree");
+        String baseTreeSha = headTree == null ? "" : headTree.optString("sha", "");
+        if (baseTreeSha.length() == 0) {
+            throw new CloudProviderException("CLOUD_WRITE_FAILED", "GitHub returned an unreadable commit");
+        }
+
+        try {
+            JSONArray tree = new JSONArray();
+            String documentBlobSha = createBlob(accessToken, repoUrl, documentBytes);
+            tree.put(treeEntry(document.path, documentBlobSha));
+            for (FileChange change : extraFiles) {
+                tree.put(treeEntry(change.path, createBlob(accessToken, repoUrl, change.bytes)));
+            }
+
+            JSONObject treeRequest = new JSONObject();
+            treeRequest.put("base_tree", baseTreeSha);
+            treeRequest.put("tree", tree);
+            String treeSha = requiredSha(apiSend(accessToken, "POST", repoUrl + "/git/trees", treeRequest, 201));
+
+            JSONObject commitRequest = new JSONObject();
+            commitRequest.put("message", message);
+            commitRequest.put("tree", treeSha);
+            commitRequest.put("parents", new JSONArray().put(headSha));
+            JSONObject commit = apiSend(accessToken, "POST", repoUrl + "/git/commits", commitRequest, 201);
+            String commitSha = requiredSha(commit);
+
+            JSONObject refUpdate = new JSONObject();
+            refUpdate.put("sha", commitSha);
+            refUpdate.put("force", false);
+            HttpTransport.Response moved = send(accessToken, "PATCH", refUrl(repoUrl, document.ref), refUpdate);
+            if (moved.status == 422 || moved.status == 409) {
+                // Not a fast-forward: someone pushed to the branch meanwhile.
+                throw new CloudProviderException(
+                    "CLOUD_DOCUMENT_CONFLICT",
+                    "This branch changed on GitHub while committing; reopen the document and try again"
+                );
+            }
+            if (moved.status != 200) {
+                throw commitException(moved, parseJson(moved.body));
+            }
+
+            JSONObject committer = commit.optJSONObject("committer");
+            String path = document.path;
+            return new CommitResult(
+                path.substring(path.lastIndexOf('/') + 1),
+                documentBlobSha,
+                commitSha,
+                committer == null ? "" : committer.optString("date", "")
+            );
+        } catch (JSONException ex) {
+            throw new IllegalStateException("Commit request serialization failed", ex);
+        }
+    }
+
+    /** Commit sha at the tip of a branch. */
+    String getBranchHead(String accessToken, String owner, String repo, String branch)
+        throws IOException, CloudProviderException {
+        String repoUrl = API + "/repos/" + Location.parse(owner + "/" + repo).serialize();
+        JSONObject ref = apiJson(accessToken, refUrl(repoUrl, branch).replace("/git/refs/", "/git/ref/"));
+        JSONObject object = ref.optJSONObject("object");
+        String sha = object == null ? "" : object.optString("sha", "");
+        if (sha.length() == 0) {
+            throw new CloudProviderException("CLOUD_REQUEST_FAILED", "GitHub returned an unreadable branch");
+        }
+        return sha;
+    }
+
+    void createBranch(String accessToken, String owner, String repo, String branch, String fromSha)
+        throws IOException, CloudProviderException {
+        if (!isValidBranchName(branch)) {
+            throw new CloudProviderException("INVALID_BRANCH_NAME", "This branch name is not valid");
+        }
+        String repoUrl = API + "/repos/" + Location.parse(owner + "/" + repo).serialize();
+        try {
+            JSONObject request = new JSONObject();
+            request.put("ref", "refs/heads/" + branch);
+            request.put("sha", fromSha);
+            HttpTransport.Response response = send(accessToken, "POST", repoUrl + "/git/refs", request);
+            if (response.status == 422) {
+                throw new CloudProviderException(
+                    "CLOUD_NAME_EXISTS",
+                    "A branch with this name already exists on GitHub"
+                );
+            }
+            if (response.status != 201) {
+                throw commitException(response, parseJson(response.body));
+            }
+        } catch (JSONException ex) {
+            throw new IllegalStateException("Branch request serialization failed", ex);
+        }
+    }
+
+    /** Best effort: a branch created for a commit that then failed is removed again. */
+    void deleteBranch(String accessToken, String owner, String repo, String branch) {
+        try {
+            String repoUrl = API + "/repos/" + Location.parse(owner + "/" + repo).serialize();
+            transport.execute(new HttpTransport.Request("DELETE", refUrl(repoUrl, branch), apiHeaders(accessToken), null));
+        } catch (IOException | CloudProviderException ignored) {
+            // The empty branch only clutters the repository; nothing is lost.
+        }
+    }
+
+    PullRequest openPullRequest(
+        String accessToken,
+        String owner,
+        String repo,
+        String head,
+        String base,
+        String title,
+        String body
+    ) throws IOException, CloudProviderException {
+        String repoUrl = API + "/repos/" + Location.parse(owner + "/" + repo).serialize();
+        try {
+            JSONObject request = new JSONObject();
+            request.put("title", title);
+            request.put("head", head);
+            request.put("base", base);
+            request.put("body", body);
+            HttpTransport.Response response = send(accessToken, "POST", repoUrl + "/pulls", request);
+            JSONObject json = parseJson(response.body);
+            if (response.status != 201) {
+                if (response.status == 422) {
+                    String detail = json == null ? "" : firstLine(json.optString("message", ""));
+                    JSONArray errors = json == null ? null : json.optJSONArray("errors");
+                    JSONObject first = errors == null ? null : errors.optJSONObject(0);
+                    if (first != null && first.optString("message", "").length() > 0) {
+                        detail = firstLine(first.optString("message", ""));
+                    }
+                    throw new CloudProviderException(
+                        "CLOUD_WRITE_REJECTED",
+                        "GitHub did not open the pull request" + (detail.length() > 0 ? ": " + detail : "")
+                    );
+                }
+                throw commitException(response, json);
+            }
+            String htmlUrl = json == null ? "" : json.optString("html_url", "");
+            if (!htmlUrl.startsWith("https://")) {
+                throw new CloudProviderException("CLOUD_WRITE_FAILED", "GitHub returned an unreadable pull request");
+            }
+            return new PullRequest(json.optInt("number", 0), htmlUrl);
+        } catch (JSONException ex) {
+            throw new IllegalStateException("Pull request serialization failed", ex);
+        }
+    }
+
+    /**
+     * A conservative subset of git's ref-name rules: ASCII letters, digits,
+     * '.', '_', '-' and '/' separators; no empty, dot-leading or '.lock'
+     * segments, no '..', and nothing GitHub would reinterpret.
+     */
+    static boolean isValidBranchName(String name) {
+        if (name == null || name.length() == 0 || name.length() > 100 || !name.matches("[A-Za-z0-9._/-]+")) {
+            return false;
+        }
+        if (name.contains("..") || name.startsWith("-") || name.endsWith(".")) {
+            return false;
+        }
+        for (String segment : name.split("/", -1)) {
+            if (segment.length() == 0 || segment.startsWith(".") || segment.endsWith(".lock")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String createBlob(String accessToken, String repoUrl, byte[] bytes)
+        throws IOException, CloudProviderException, JSONException {
+        JSONObject request = new JSONObject();
+        request.put("content", base64(bytes));
+        request.put("encoding", "base64");
+        return requiredSha(apiSend(accessToken, "POST", repoUrl + "/git/blobs", request, 201));
+    }
+
+    private static JSONObject treeEntry(String path, String blobSha) throws JSONException {
+        JSONObject entry = new JSONObject();
+        entry.put("path", path);
+        entry.put("mode", "100644");
+        entry.put("type", "blob");
+        entry.put("sha", blobSha);
+        return entry;
+    }
+
+    private static String requiredSha(JSONObject json) throws CloudProviderException {
+        String sha = json.optString("sha", "");
+        if (sha.length() == 0) {
+            throw new CloudProviderException("CLOUD_WRITE_FAILED", "GitHub commit returned an unreadable response");
+        }
+        return sha;
+    }
+
+    /** {@code .../git/refs/heads/<branch>} with each branch segment encoded. */
+    private static String refUrl(String repoUrl, String branch) {
+        StringBuilder url = new StringBuilder(repoUrl).append("/git/refs/heads");
+        for (String segment : branch.split("/")) {
+            url.append('/').append(encodePathSegment(segment));
+        }
+        return url.toString();
+    }
+
+    private JSONObject apiSend(String accessToken, String method, String url, JSONObject body, int expectedStatus)
+        throws IOException, CloudProviderException {
+        HttpTransport.Response response = send(accessToken, method, url, body);
+        JSONObject json = parseJson(response.body);
+        if (response.status != expectedStatus) {
+            throw commitException(response, json);
+        }
+        if (json == null) {
+            throw new CloudProviderException("CLOUD_WRITE_FAILED", "GitHub returned an unreadable response");
+        }
+        return json;
+    }
+
+    private HttpTransport.Response send(String accessToken, String method, String url, JSONObject body)
+        throws IOException {
+        Map<String, String> headers = apiHeaders(accessToken);
+        headers.put("Content-Type", "application/json");
+        return transport.execute(new HttpTransport.Request(
+            method,
+            url,
+            headers,
+            body.toString().getBytes(StandardCharsets.UTF_8)
+        ));
     }
 
     private static CloudProviderException commitException(HttpTransport.Response response, JSONObject json) {

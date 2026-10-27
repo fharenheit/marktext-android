@@ -34,10 +34,25 @@ export interface CloudDocumentContent {
 }
 
 export interface CloudDocumentWriteResult {
+  /** The written document's id; a new-branch commit returns the copy on that branch. */
   fileId: string
   displayName: string
   eTag: string
   lastModified: string
+  pullRequestNumber?: number
+  pullRequestUrl?: string
+  /** Set when the commit landed but the pull request could not be opened. */
+  pullRequestError?: string
+}
+
+/** GitHub-only write options beyond the plain conflict-checked commit. */
+export interface GitHubCommitOptions {
+  commitMessage?: string
+  /** Commit to this new branch, created from the document's branch. */
+  newBranch?: string
+  openPullRequest?: boolean
+  /** Device images added to the repository in the same commit. */
+  localImages?: { name: string; path: string }[]
 }
 
 /**
@@ -118,8 +133,7 @@ interface CloudDocumentsPlugin {
     encoding?: string
     writeBom?: boolean
     eTag?: string
-    commitMessage?: string
-  }): Promise<CloudDocumentWriteResult>
+  } & GitHubCommitOptions): Promise<CloudDocumentWriteResult>
   createCloudDocument(options: {
     provider: CloudProviderId
     parentId?: string
@@ -218,7 +232,7 @@ export async function writeCloudDocument(
   provider: CloudProviderId,
   fileId: string,
   markdown: string,
-  options: { encoding?: string; writeBom?: boolean; eTag?: string; commitMessage?: string } = {},
+  options: { encoding?: string; writeBom?: boolean; eTag?: string } & GitHubCommitOptions = {},
 ) {
   return wrapCloudErrors(() =>
     CloudDocuments.writeCloudDocument({
@@ -229,6 +243,8 @@ export async function writeCloudDocument(
       writeBom: options.writeBom,
       eTag: options.eTag,
       commitMessage: options.commitMessage,
+      ...(options.newBranch ? { newBranch: options.newBranch, openPullRequest: options.openPullRequest } : {}),
+      ...(options.localImages?.length ? { localImages: options.localImages } : {}),
     }),
   )
 }

@@ -662,6 +662,17 @@ export const en = {
   'commit.body': 'Your edits are committed to the document’s branch.',
   'commit.confirm': 'Commit',
   'commit.defaultMessage': 'Update {name}',
+  'commit.newBranch': 'Commit to a new branch and open a pull request',
+  'commit.branchName': 'Branch name',
+  'commit.invalidBranch': 'Use letters, digits, “-”, “_”, “.” and “/” (no spaces or “..”).',
+  'commit.confirmPullRequest': 'Commit and open pull request',
+  'commit.imagesNote': 'Images inserted on this device ({count}) are added next to the document in the same commit.',
+  'commit.pullRequestTitle': 'Pull request #{number} opened',
+  'commit.branchCommittedTitle': 'Committed to a new branch',
+  'commit.pullRequestBody': 'Your edits are on the branch {branch}. Review and merge them on GitHub.',
+  'commit.pullRequestFailed': 'Your edits were committed to the branch {branch}, but the pull request could not be opened. {error}',
+  'commit.openOnGitHub': 'Open on GitHub',
+  'commit.close': 'Close',
 }
 
 export type I18nKey = keyof typeof en

@@ -517,4 +517,147 @@ public class GitHubClientTest {
             .readRaw("T", GitHubClient.Location.parse("o/r/main/a.png"), 4));
         assertEquals(4, transport.requests.get(0).maxResponseBytes);
     }
+
+    @Test
+    public void multiFileCommitsBuildOneCommitOnTheBranchHead() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.enqueue(200, "{\"object\":{\"sha\":\"head1\"}}");
+        transport.enqueue(200, "{\"type\":\"file\",\"sha\":\"doc-old\"}");
+        transport.enqueue(200, "{\"sha\":\"head1\",\"tree\":{\"sha\":\"tree1\"}}");
+        transport.enqueue(201, "{\"sha\":\"blob-doc\"}");
+        transport.enqueue(201, "{\"sha\":\"blob-img\"}");
+        transport.enqueue(201, "{\"sha\":\"tree2\"}");
+        transport.enqueue(201, "{\"sha\":\"commit2\",\"committer\":{\"date\":\"2026-10-27T02:00:00Z\"}}");
+        transport.enqueue(200, "{\"object\":{\"sha\":\"commit2\"}}");
+
+        GitHubClient.CommitResult result = new GitHubClient(transport).commitFiles(
+            "T",
+            GitHubClient.Location.parse("o/r/feature%2Fx/docs%2Fa.md"),
+            "# a".getBytes(StandardCharsets.UTF_8),
+            "doc-old",
+            java.util.Collections.singletonList(
+                new GitHubClient.FileChange("docs/images/1-abc-shot.png", new byte[] { 1, 2, 3 })),
+            "Add screenshot"
+        );
+
+        assertEquals("a.md", result.name);
+        assertEquals("blob-doc", result.sha);
+        assertEquals("commit2", result.commitSha);
+        List<HttpTransport.Request> requests = transport.requests;
+        assertEquals("https://api.github.com/repos/o/r/git/ref/heads/feature/x", requests.get(0).url);
+        assertEquals("https://api.github.com/repos/o/r/contents/docs/a.md?ref=head1", requests.get(1).url);
+        assertEquals("https://api.github.com/repos/o/r/git/commits/head1", requests.get(2).url);
+        org.json.JSONObject imageBlob = new org.json.JSONObject(bodyOf(requests.get(4)));
+        assertEquals("AQID", imageBlob.getString("content"));
+        assertEquals("base64", imageBlob.getString("encoding"));
+        org.json.JSONObject tree = new org.json.JSONObject(bodyOf(requests.get(5)));
+        assertEquals("tree1", tree.getString("base_tree"));
+        assertEquals("docs/a.md", tree.getJSONArray("tree").getJSONObject(0).getString("path"));
+        assertEquals("blob-doc", tree.getJSONArray("tree").getJSONObject(0).getString("sha"));
+        assertEquals("docs/images/1-abc-shot.png", tree.getJSONArray("tree").getJSONObject(1).getString("path"));
+        assertEquals("100644", tree.getJSONArray("tree").getJSONObject(1).getString("mode"));
+        org.json.JSONObject commit = new org.json.JSONObject(bodyOf(requests.get(6)));
+        assertEquals("Add screenshot", commit.getString("message"));
+        assertEquals("tree2", commit.getString("tree"));
+        assertEquals("head1", commit.getJSONArray("parents").getString(0));
+        HttpTransport.Request refUpdate = requests.get(7);
+        assertEquals("PATCH", refUpdate.method);
+        assertEquals("https://api.github.com/repos/o/r/git/refs/heads/feature/x", refUpdate.url);
+        org.json.JSONObject refBody = new org.json.JSONObject(bodyOf(refUpdate));
+        assertEquals("commit2", refBody.getString("sha"));
+        assertFalse(refBody.getBoolean("force"));
+    }
+
+    @Test
+    public void multiFileCommitsRefuseAMovedDocumentOrBranch() throws Exception {
+        FakeTransport moved = new FakeTransport();
+        moved.enqueue(200, "{\"object\":{\"sha\":\"head1\"}}");
+        moved.enqueue(200, "{\"type\":\"file\",\"sha\":\"someone-else\"}");
+        assertFailsWith("CLOUD_DOCUMENT_CONFLICT", () -> new GitHubClient(moved).commitFiles(
+            "T", GitHubClient.Location.parse("o/r/main/a.md"), new byte[0], "doc-old",
+            java.util.Collections.emptyList(), "m"));
+        assertEquals(2, moved.requests.size());
+
+        FakeTransport raced = new FakeTransport();
+        raced.enqueue(200, "{\"object\":{\"sha\":\"head1\"}}");
+        raced.enqueue(200, "{\"type\":\"file\",\"sha\":\"doc-old\"}");
+        raced.enqueue(200, "{\"sha\":\"head1\",\"tree\":{\"sha\":\"tree1\"}}");
+        raced.enqueue(201, "{\"sha\":\"blob-doc\"}");
+        raced.enqueue(201, "{\"sha\":\"tree2\"}");
+        raced.enqueue(201, "{\"sha\":\"commit2\"}");
+        raced.enqueue(422, "{\"message\":\"Update is not a fast forward\"}");
+        assertFailsWith("CLOUD_DOCUMENT_CONFLICT", () -> new GitHubClient(raced).commitFiles(
+            "T", GitHubClient.Location.parse("o/r/main/a.md"), new byte[0], "doc-old",
+            java.util.Collections.emptyList(), "m"));
+    }
+
+    @Test
+    public void multiFileCommitsValidateExtraPaths() throws Exception {
+        FakeTransport transport = new FakeTransport();
+
+        assertFailsWith("INVALID_CLOUD_FILE_ID", () -> new GitHubClient(transport).commitFiles(
+            "T", GitHubClient.Location.parse("o/r/main/a.md"), new byte[0], "doc-old",
+            java.util.Collections.singletonList(new GitHubClient.FileChange("../escape.png", new byte[0])), "m"));
+        assertTrue(transport.requests.isEmpty());
+    }
+
+    @Test
+    public void branchesAreCreatedFromAShaAndExistingNamesReported() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.enqueue(201, "{\"ref\":\"refs/heads/marktext/fix\"}");
+        transport.enqueue(422, "{\"message\":\"Reference already exists\"}");
+        GitHubClient client = new GitHubClient(transport);
+
+        client.createBranch("T", "o", "r", "marktext/fix", "head1");
+        org.json.JSONObject body = new org.json.JSONObject(bodyOf(transport.requests.get(0)));
+        assertEquals("https://api.github.com/repos/o/r/git/refs", transport.requests.get(0).url);
+        assertEquals("refs/heads/marktext/fix", body.getString("ref"));
+        assertEquals("head1", body.getString("sha"));
+
+        assertFailsWith("CLOUD_NAME_EXISTS", () -> client.createBranch("T", "o", "r", "marktext/fix", "head1"));
+        assertFailsWith("INVALID_BRANCH_NAME", () -> client.createBranch("T", "o", "r", "bad..name", "head1"));
+    }
+
+    @Test
+    public void pullRequestsOpenAgainstTheBaseBranch() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.enqueue(201, "{\"number\":12,\"html_url\":\"https://github.com/o/r/pull/12\"}");
+        transport.enqueue(422, "{\"message\":\"Validation Failed\",\"errors\":[{\"message\":\"A pull request already exists for o:x.\"}]}");
+        GitHubClient client = new GitHubClient(transport);
+
+        GitHubClient.PullRequest pullRequest =
+            client.openPullRequest("T", "o", "r", "marktext/fix", "main", "Fix typo", "body");
+
+        assertEquals(12, pullRequest.number);
+        assertEquals("https://github.com/o/r/pull/12", pullRequest.htmlUrl);
+        org.json.JSONObject body = new org.json.JSONObject(bodyOf(transport.requests.get(0)));
+        assertEquals("marktext/fix", body.getString("head"));
+        assertEquals("main", body.getString("base"));
+        assertEquals("Fix typo", body.getString("title"));
+        try {
+            client.openPullRequest("T", "o", "r", "x", "main", "t", "b");
+            fail("Expected CLOUD_WRITE_REJECTED");
+        } catch (CloudProviderException ex) {
+            assertEquals("CLOUD_WRITE_REJECTED", ex.code);
+            assertEquals("GitHub did not open the pull request: A pull request already exists for o:x.", ex.getMessage());
+        }
+    }
+
+    @Test
+    public void branchNamesFollowSafeRefRules() {
+        assertTrue(GitHubClient.isValidBranchName("marktext/update-readme-20261027"));
+        assertTrue(GitHubClient.isValidBranchName("fix_1.2"));
+        assertFalse(GitHubClient.isValidBranchName(""));
+        assertFalse(GitHubClient.isValidBranchName("has space"));
+        assertFalse(GitHubClient.isValidBranchName("a..b"));
+        assertFalse(GitHubClient.isValidBranchName("/lead"));
+        assertFalse(GitHubClient.isValidBranchName("trail/"));
+        assertFalse(GitHubClient.isValidBranchName("a//b"));
+        assertFalse(GitHubClient.isValidBranchName("-dash"));
+        assertFalse(GitHubClient.isValidBranchName("x.lock"));
+        assertFalse(GitHubClient.isValidBranchName("a/.hidden"));
+        assertFalse(GitHubClient.isValidBranchName("end."));
+        assertFalse(GitHubClient.isValidBranchName("a~1"));
+        assertFalse(GitHubClient.isValidBranchName("한글"));
+    }
 }

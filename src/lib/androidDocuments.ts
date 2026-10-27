@@ -420,7 +420,20 @@ export function getAndroidDocumentUserMessage(error: unknown) {
   }
 
   if (code === 'CLOUD_WRITE_REJECTED') {
-    return 'GitHub rejected the commit, for example because the branch is protected. Save a copy instead.'
+    return 'GitHub rejected the commit, for example because the branch is protected. Commit to a new branch instead.'
+  }
+
+  if (code === 'INVALID_BRANCH_NAME') {
+    return 'This branch name is not valid.'
+  }
+
+  // Device images added to a GitHub commit.
+  if (code === 'IMAGE_NOT_FOUND' || code === 'INVALID_IMAGE_RESULT') {
+    return 'An image in this document is missing on this device. Remove or insert it again before committing.'
+  }
+
+  if (code === 'IMAGE_TOO_LARGE') {
+    return 'The images in this document are too large to commit (15 MB each, 60 MB together).'
   }
 
   if (code === 'CLOUD_WRITE_FORBIDDEN') {

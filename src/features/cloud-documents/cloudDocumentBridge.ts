@@ -15,6 +15,7 @@ import {
   type CloudProviderId,
 } from '../../lib/cloudDocuments'
 import { buildCloudSourceUri, parseCloudSourceUri } from '../../lib/cloudDocumentUris'
+import { prepareLocalImagesForCommit } from './githubImages'
 
 /**
  * GitHub saves are commits: autosave must never write them, only an
@@ -141,11 +142,16 @@ export async function writeRoutedMarkdownDocument(
     )
   }
 
-  const written = await writeCloudDocument(cloud.provider, cloud.fileId, markdown, {
+  // GitHub commits carry device-inserted images along, as repo files.
+  const prepared = cloud.provider === 'github'
+    ? prepareLocalImagesForCommit(markdown, cloud.fileId)
+    : { markdown, images: [] }
+  const written = await writeCloudDocument(cloud.provider, cloud.fileId, prepared.markdown, {
     encoding: options.encoding,
     writeBom: options.writeBom,
     eTag,
     commitMessage: options.commitMessage,
+    ...(prepared.images.length ? { localImages: prepared.images } : {}),
   })
   cloudDocumentETags.set(sourceUri, written.eTag)
   return {
@@ -157,5 +163,89 @@ export async function writeRoutedMarkdownDocument(
     encoding: options.encoding,
     canWrite: true,
     persisted: true,
+  }
+}
+
+export interface NewBranchCommitResult {
+  /** The document on the new branch: the editor continues there. */
+  document: OpenedAndroidDocument
+  pullRequest: { number: number; url: string } | null
+  /** The commit landed but GitHub did not open the pull request. */
+  pullRequestError: string | null
+}
+
+/**
+ * Commits a GitHub document to a new branch (created from its current
+ * branch) and optionally opens a pull request back. The result adopts the
+ * branch copy into the opened-document shape with its version tag seeded,
+ * like a save-as, so the next commit continues on the new branch.
+ */
+export async function commitRoutedCloudDocumentToNewBranch(
+  sourceUri: string,
+  markdown: string,
+  options: {
+    encoding: OpenedAndroidDocument['encoding']
+    writeBom: boolean
+    commitMessage: string
+    branch: string
+    openPullRequest: boolean
+  },
+): Promise<NewBranchCommitResult> {
+  const cloud = parseCloudSourceUri(sourceUri)
+  if (cloud?.provider !== 'github') {
+    throw new AndroidDocumentError(
+      'CLOUD_OPERATION_UNSUPPORTED',
+      'Only GitHub documents can be committed to a new branch',
+    )
+  }
+  const eTag = cloudDocumentETags.get(sourceUri)
+  if (!eTag) {
+    throw new AndroidDocumentError(
+      'CLOUD_DOCUMENT_CONFLICT',
+      'This document must be reopened before it can be saved to the cloud',
+    )
+  }
+
+  const prepared = prepareLocalImagesForCommit(markdown, cloud.fileId)
+  const written = await writeCloudDocument('github', cloud.fileId, prepared.markdown, {
+    encoding: options.encoding,
+    writeBom: options.writeBom,
+    eTag,
+    commitMessage: options.commitMessage,
+    newBranch: options.branch,
+    openPullRequest: options.openPullRequest,
+    localImages: prepared.images,
+  })
+
+  const branchSourceUri = buildCloudSourceUri('github', written.fileId)
+  cloudDocumentETags.set(branchSourceUri, written.eTag)
+  const [owner, repo] = written.fileId.split('/')
+  const path = cloud.fileId.split('/')[3]
+  return {
+    document: {
+      canceled: false,
+      sourceUri: branchSourceUri,
+      displayName: written.displayName,
+      providerName: CLOUD_PROVIDER_LABELS.github,
+      pathHint: `${owner}/${repo}@${options.branch}/${safeDecode(path)}`,
+      mimeType: 'text/markdown',
+      markdown,
+      encoding: options.encoding,
+      hasEncodingBom: options.writeBom,
+      canWrite: true,
+      persisted: true,
+    },
+    pullRequest: written.pullRequestUrl
+      ? { number: written.pullRequestNumber ?? 0, url: written.pullRequestUrl }
+      : null,
+    pullRequestError: written.pullRequestError ?? null,
+  }
+}
+
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
   }
 }

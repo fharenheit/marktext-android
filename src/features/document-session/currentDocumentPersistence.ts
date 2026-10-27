@@ -124,6 +124,8 @@ export interface CurrentDocumentPersistenceOptions {
   draftLogger: PersistenceLogger
 }
 
+export type { CreateAndroidMarkdownDocument }
+
 export interface CurrentDocumentPersistence {
   /** Returns whether the recovery draft was durably written to storage. */
   persistAndroidRecoveryDraft(sourceUri: string, markdown: string): boolean
@@ -138,7 +140,15 @@ export interface CurrentDocumentPersistence {
   /** Commits the current document (commit-only sources) with the given message. */
   commitCurrentDocument(message: string): Promise<boolean>
   saveLocalDraftToAndroidDocument(options?: { returnHomeAfterSave?: boolean }): Promise<boolean>
-  saveAndroidDocumentCopy(options?: { returnHomeAfterSave?: boolean }): Promise<boolean>
+  /**
+   * Saves the current document as a new one and continues editing that one.
+   * `createDocument` replaces the destination prompt, e.g. with a commit
+   * to a new GitHub branch.
+   */
+  saveAndroidDocumentCopy(options?: {
+    returnHomeAfterSave?: boolean
+    createDocument?: CreateAndroidMarkdownDocument
+  }): Promise<boolean>
   shareCurrentMarkdownDocument(): Promise<boolean>
   exportCurrentDocumentPdf(): Promise<boolean>
   flushCurrentDocument(reason: string): Promise<void>
@@ -481,7 +491,9 @@ export function createCurrentDocumentPersistence(
     }
   }
 
-  async function saveAndroidDocumentCopy(saveOptions: { returnHomeAfterSave?: boolean } = {}) {
+  async function saveAndroidDocumentCopy(
+    saveOptions: { returnHomeAfterSave?: boolean, createDocument?: CreateAndroidMarkdownDocument } = {},
+  ) {
     options.closeEditorMenu()
 
     if (
@@ -510,7 +522,8 @@ export function createCurrentDocumentPersistence(
         ),
         returnHomeAfterSave: saveOptions.returnHomeAfterSave === true,
         transientAccessMessage: options.getTransientAndroidSaveMessage(),
-        createAndroidMarkdownDocument: options.createAndroidMarkdownDocument,
+        createAndroidMarkdownDocument:
+          saveOptions.createDocument ?? options.createAndroidMarkdownDocument,
         getAndroidDocumentUserMessage: options.getAndroidDocumentUserMessage,
         markdownSaveSettings: options.markdownSaveSettings.value,
         logger: options.documentLogger,

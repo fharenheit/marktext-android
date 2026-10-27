@@ -1,15 +1,23 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from '../../lib/i18n'
 import { useModalFocus } from '../../lib/modalFocus'
+import { isValidBranchName } from './githubBranches'
 
-const props = defineProps<{
-  suggestedMessage: string
-  committing: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    suggestedMessage: string
+    /** Prefilled name for a commit to a new branch with a pull request. */
+    suggestedBranch: string
+    committing: boolean
+    /** Images inserted on this device that the commit adds to the repository. */
+    imageCount?: number
+  }>(),
+  { imageCount: 0 },
+)
 
 const emit = defineEmits<{
-  confirm: [message: string]
+  confirm: [commit: { message: string; newBranch: string | null }]
   cancel: []
 }>()
 
@@ -25,6 +33,15 @@ const { onModalKeydown } = useModalFocus({
 })
 const message = ref(props.suggestedMessage)
 const messageInput = ref<HTMLInputElement | null>(null)
+const useNewBranch = ref(false)
+const branch = ref(props.suggestedBranch)
+const branchValid = computed(() => isValidBranchName(branch.value.trim()))
+const canConfirm = computed(
+  () =>
+    !props.committing
+    && message.value.trim().length > 0
+    && (!useNewBranch.value || branchValid.value),
+)
 
 onMounted(() => {
   messageInput.value?.focus()
@@ -32,11 +49,13 @@ onMounted(() => {
 })
 
 function confirm() {
-  const trimmed = message.value.trim()
-  if (trimmed.length === 0 || props.committing) {
+  if (!canConfirm.value) {
     return
   }
-  emit('confirm', trimmed)
+  emit('confirm', {
+    message: message.value.trim(),
+    newBranch: useNewBranch.value ? branch.value.trim() : null,
+  })
 }
 </script>
 
@@ -53,7 +72,7 @@ function confirm() {
   >
     <div class="draft-save-panel">
       <h2 id="github-commit-title">{{ t('commit.title') }}</h2>
-      <p>{{ t('commit.body') }}</p>
+      <p v-if="!useNewBranch">{{ t('commit.body') }}</p>
       <input
         ref="messageInput"
         v-model="message"
@@ -65,15 +84,51 @@ function confirm() {
         :disabled="committing"
         @keydown.enter.prevent="confirm"
       >
+      <p v-if="imageCount > 0" class="github-commit-note" data-testid="github-commit-images">
+        {{ t('commit.imagesNote', { count: imageCount }) }}
+      </p>
+      <label class="github-commit-option">
+        <input
+          v-model="useNewBranch"
+          type="checkbox"
+          data-testid="github-commit-new-branch"
+          :disabled="committing"
+        >
+        <span>{{ t('commit.newBranch') }}</span>
+      </label>
+      <template v-if="useNewBranch">
+        <input
+          v-model="branch"
+          class="github-commit-input"
+          type="text"
+          autocapitalize="off"
+          autocomplete="off"
+          spellcheck="false"
+          :aria-label="t('commit.branchName')"
+          :aria-invalid="!branchValid"
+          data-testid="github-commit-branch"
+          :disabled="committing"
+          @keydown.enter.prevent="confirm"
+        >
+        <p v-if="!branchValid" class="github-commit-note" role="alert">
+          {{ t('commit.invalidBranch') }}
+        </p>
+      </template>
       <div class="draft-save-actions">
         <button
           class="primary-action"
           type="button"
           data-testid="github-commit-confirm"
-          :disabled="committing || message.trim().length === 0"
+          :disabled="!canConfirm"
           @click="confirm"
         >
-          {{ committing ? t('app.status.committing') : t('commit.confirm') }}
+          {{
+            committing
+              ? t('app.status.committing')
+              : useNewBranch
+                ? t('commit.confirmPullRequest')
+                : t('commit.confirm')
+          }}
         </button>
         <button
           type="button"
@@ -99,5 +154,27 @@ function confirm() {
   background: var(--surface, transparent);
   border: 1px solid var(--border, currentColor);
   border-radius: var(--radius-sm);
+}
+
+.github-commit-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.github-commit-option input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.github-commit-note {
+  margin: -4px 0 12px;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 </style>

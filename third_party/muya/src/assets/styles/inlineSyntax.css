@@ -381,6 +381,62 @@ blockquote .mu-hide.mu-math > .mu-math-render {
     color: var(--editor-color-50);
 }
 
+/* inline <svg>: the source shows (with a floating preview) while edited,
+   otherwise the rendered element stands in for it, like ruby and math */
+.mu-inline-svg {
+    position: relative;
+
+    display: inline-block;
+
+    /* Cap the box against the paragraph (a definite containing block); a
+       percentage max-width on the shrink-to-fit render child would resolve
+       to zero and collapse the drawing, as with inline math. */
+    max-width: 100%;
+
+    vertical-align: middle;
+}
+
+.mu-inline-svg > .mu-inline-svg-render {
+    position: absolute;
+    top: calc(100% + 0.5em);
+    left: 0;
+    z-index: 100;
+
+    display: inline-block;
+    padding: 0.3em 0.5em;
+
+    line-height: 0;
+
+    background: var(--float-bg-color);
+    border-radius: 4px;
+    box-shadow: var(--float-shadow);
+}
+
+.mu-hide.mu-inline-svg {
+    width: auto;
+    height: auto;
+}
+
+.mu-hide.mu-inline-svg > .mu-inline-svg-text {
+    display: inline-block;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+}
+
+.mu-hide.mu-inline-svg > .mu-inline-svg-render {
+    position: relative;
+    top: 0;
+    z-index: auto;
+
+    padding: 0;
+
+    vertical-align: middle;
+
+    background: transparent;
+    box-shadow: none;
+}
+
 /* header space */
 .mu-header-tight-space {
     margin-left: -0.3em;

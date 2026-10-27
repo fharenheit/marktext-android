@@ -773,8 +773,19 @@ public class CloudDocumentsPlugin extends Plugin {
         String encoding = MarkdownCodec.normalizeEncoding(call.getString("encoding", "utf8"));
         boolean writeBom = call.getBoolean("writeBom", false);
         String commitMessage = call.getString("commitMessage", "").trim();
+        String newBranch = call.getString("newBranch", "").trim();
+        boolean openPullRequest = call.getBoolean("openPullRequest", false);
+        JSArray localImages = call.getArray("localImages", new JSArray());
         ProviderAuth auth = requireDocumentProvider(call, provider);
         if (auth == null) {
+            return;
+        }
+        if (auth != githubAuth && (newBranch.length() > 0 || localImages.length() > 0)) {
+            call.reject("Branches and image uploads are GitHub-only", "CLOUD_OPERATION_UNSUPPORTED");
+            return;
+        }
+        if (newBranch.length() > 0 && !GitHubClient.isValidBranchName(newBranch)) {
+            call.reject("This branch name is not valid", "INVALID_BRANCH_NAME");
             return;
         }
         if (fileId.length() == 0) {
@@ -796,20 +807,55 @@ public class CloudDocumentsPlugin extends Plugin {
                 String name;
                 String versionTag;
                 String lastModified;
+                String writtenFileId = fileId;
+                GitHubClient.PullRequest pullRequest = null;
+                String pullRequestError = null;
                 if (auth == githubAuth) {
                     GitHubClient.Location location = GitHubClient.Location.parse(fileId);
-                    GitHubClient.CommitResult committed = githubClient.writeFile(
-                        tokens.accessToken,
-                        location,
-                        bytes,
-                        eTag,
-                        commitMessage.length() > 0
-                            ? commitMessage
-                            : "Update " + location.path
-                    );
+                    String message = commitMessage.length() > 0 ? commitMessage : "Update " + location.path;
+                    List<GitHubClient.FileChange> images = readLocalImagesForCommit(localImages);
+                    GitHubClient.Location target = location;
+                    if (newBranch.length() > 0) {
+                        String headSha = githubClient.getBranchHead(
+                            tokens.accessToken, location.owner, location.repo, location.ref);
+                        githubClient.createBranch(
+                            tokens.accessToken, location.owner, location.repo, newBranch, headSha);
+                        target = new GitHubClient.Location(location.owner, location.repo, newBranch, location.path);
+                    }
+                    GitHubClient.CommitResult committed;
+                    try {
+                        committed = images.isEmpty()
+                            ? githubClient.writeFile(tokens.accessToken, target, bytes, eTag, message)
+                            : githubClient.commitFiles(tokens.accessToken, target, bytes, eTag, images, message);
+                    } catch (CloudProviderException | IOException ex) {
+                        if (target != location) {
+                            githubClient.deleteBranch(
+                                tokens.accessToken, location.owner, location.repo, newBranch);
+                        }
+                        throw ex;
+                    }
+                    if (target != location && openPullRequest) {
+                        // The commit already landed on the new branch; a
+                        // failed pull request must not report it as lost.
+                        try {
+                            pullRequest = githubClient.openPullRequest(
+                                tokens.accessToken,
+                                location.owner,
+                                location.repo,
+                                newBranch,
+                                location.ref,
+                                firstLine(message),
+                                "Edited with MarkText for Android."
+                            );
+                        } catch (CloudProviderException | IOException ex) {
+                            Log.w(TAG, "GitHub pull request failed: " + ex.getMessage());
+                            pullRequestError = ex.getMessage();
+                        }
+                    }
                     name = committed.name;
                     versionTag = committed.sha;
                     lastModified = committed.committedAt;
+                    writtenFileId = target.serialize();
                 } else if (auth == googleDriveAuth) {
                     GoogleDriveClient.WriteResult written =
                         driveClient.writeFile(tokens.accessToken, fileId, bytes, eTag);
@@ -825,10 +871,17 @@ public class CloudDocumentsPlugin extends Plugin {
                 }
 
                 JSObject result = new JSObject();
-                result.put("fileId", fileId);
+                result.put("fileId", writtenFileId);
                 result.put("displayName", name);
                 result.put("eTag", versionTag);
                 result.put("lastModified", lastModified);
+                if (pullRequest != null) {
+                    result.put("pullRequestNumber", pullRequest.number);
+                    result.put("pullRequestUrl", pullRequest.htmlUrl);
+                }
+                if (pullRequestError != null) {
+                    result.put("pullRequestError", pullRequestError);
+                }
                 Log.i(TAG, "Wrote " + auth.label + " document: " + safeForLog(name));
                 call.resolve(result);
             } catch (CloudProviderException ex) {
@@ -855,6 +908,48 @@ public class CloudDocumentsPlugin extends Plugin {
             return githubAuth;
         }
         return null;
+    }
+
+    /**
+     * Images inserted on the device (app-local files) that the commit adds
+     * next to the document. Names come from the web layer, so only plain
+     * file names inside the imported-image directory are accepted.
+     */
+    private List<GitHubClient.FileChange> readLocalImagesForCommit(JSArray values)
+        throws CloudProviderException, IOException {
+        List<GitHubClient.FileChange> changes = new java.util.ArrayList<>();
+        java.io.File directory = new java.io.File(getContext().getFilesDir(), "images");
+        long totalBytes = 0;
+        for (int index = 0; index < values.length(); index++) {
+            JSONObject value = values.optJSONObject(index);
+            String name = value == null ? "" : value.optString("name", "");
+            String path = value == null ? "" : value.optString("path", "");
+            if (!name.matches("[A-Za-z0-9_-][A-Za-z0-9._-]*") || path.length() == 0) {
+                throw new CloudProviderException("INVALID_IMAGE_RESULT", "An image to commit has an invalid name");
+            }
+            java.io.File file = new java.io.File(directory, name);
+            if (!file.isFile()) {
+                throw new CloudProviderException("IMAGE_NOT_FOUND", "An image in this document is missing on this device");
+            }
+            if (file.length() > GitHubImageServer.MAX_IMAGE_BYTES) {
+                throw new CloudProviderException("IMAGE_TOO_LARGE", "An image in this document is larger than 15 MB");
+            }
+            totalBytes += file.length();
+            if (totalBytes > 4L * GitHubImageServer.MAX_IMAGE_BYTES) {
+                throw new CloudProviderException("IMAGE_TOO_LARGE", "The images in this commit exceed 60 MB together");
+            }
+            byte[] bytes = new byte[(int) file.length()];
+            try (java.io.DataInputStream input = new java.io.DataInputStream(new java.io.FileInputStream(file))) {
+                input.readFully(bytes);
+            }
+            changes.add(new GitHubClient.FileChange(path, bytes));
+        }
+        return changes;
+    }
+
+    private static String firstLine(String value) {
+        int lineEnd = value.indexOf('\n');
+        return (lineEnd >= 0 ? value.substring(0, lineEnd) : value).trim();
     }
 
     /** Save-as cannot target GitHub yet: new files need a folder pick there. */
