@@ -194,6 +194,92 @@ function onToggleSplitView() {
 // In the split view the WYSIWYG pane stays mounted and editable next to the
 // source textarea; everything WYSIWYG-only (toolbar, …) follows it.
 const wysiwygVisible = computed(() => !props.sourceModeActive || Boolean(props.splitViewActive))
+const splitActive = computed(() => Boolean(props.splitViewActive) && props.sourceModeActive)
+
+// Splitter: the source pane's share of the split, kept per device.
+const SPLIT_RATIO_STORAGE_KEY = 'marktext.splitView.ratio'
+const SPLIT_RATIO_MIN = 0.15
+const SPLIT_RATIO_MAX = 0.85
+const editorPane = ref<HTMLElement | null>(null)
+const splitDragging = ref(false)
+const splitRatio = ref(readSplitRatio())
+
+function clampSplitRatio(value: number) {
+  return Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, value))
+}
+
+function readSplitRatio() {
+  try {
+    const stored = Number.parseFloat(localStorage.getItem(SPLIT_RATIO_STORAGE_KEY) ?? '')
+    return Number.isFinite(stored) ? clampSplitRatio(stored) : 0.5
+  } catch {
+    return 0.5
+  }
+}
+
+function setSplitRatio(value: number, persist: boolean) {
+  splitRatio.value = clampSplitRatio(value)
+  if (persist) {
+    try {
+      localStorage.setItem(SPLIT_RATIO_STORAGE_KEY, splitRatio.value.toFixed(3))
+    } catch {
+      // Remembering the position is a convenience only.
+    }
+  }
+}
+
+function isSplitHorizontal() {
+  return editorPane.value ? getComputedStyle(editorPane.value).flexDirection === 'row' : false
+}
+
+function ratioFromPointer(event: PointerEvent) {
+  const pane = editorPane.value
+  if (!pane) {
+    return splitRatio.value
+  }
+  const rect = pane.getBoundingClientRect()
+  const style = getComputedStyle(pane)
+  const divider = Number.parseFloat(style.getPropertyValue('--split-divider')) || 16
+  if (isSplitHorizontal()) {
+    const inner = rect.width - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)
+    return (event.clientX - rect.left - Number.parseFloat(style.paddingLeft) - divider / 2) / (inner - divider)
+  }
+  const inner = rect.height - Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom)
+  return (event.clientY - rect.top - Number.parseFloat(style.paddingTop) - divider / 2) / (inner - divider)
+}
+
+function onSplitPointerDown(event: PointerEvent) {
+  event.preventDefault()
+  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
+  splitDragging.value = true
+}
+
+function onSplitPointerMove(event: PointerEvent) {
+  if (splitDragging.value) {
+    setSplitRatio(ratioFromPointer(event), false)
+  }
+}
+
+function onSplitPointerUp(event: PointerEvent) {
+  if (!splitDragging.value) {
+    return
+  }
+  splitDragging.value = false
+  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+  setSplitRatio(splitRatio.value, true)
+}
+
+function onSplitKeydown(event: KeyboardEvent) {
+  const step = event.shiftKey ? 0.1 : 0.05
+  const keys: Record<string, number> = { ArrowLeft: -step, ArrowUp: -step, ArrowRight: step, ArrowDown: step }
+  if (event.key in keys) {
+    event.preventDefault()
+    setSplitRatio(splitRatio.value + keys[event.key], true)
+  } else if (event.key === 'Home' || event.key === 'End') {
+    event.preventDefault()
+    setSplitRatio(event.key === 'Home' ? SPLIT_RATIO_MIN : SPLIT_RATIO_MAX, true)
+  }
+}
 
 watch(
   () => props.sourceModeActive,
@@ -585,8 +671,10 @@ onBeforeUnmount(() => {
     </header>
 
     <section
+      ref="editorPane"
       class="editor-pane"
-      :class="{ 'editor-pane-split': splitViewActive && sourceModeActive }"
+      :class="{ 'editor-pane-split': splitActive }"
+      :style="splitActive ? { '--split-ratio': String(splitRatio) } : undefined"
       :aria-label="t('editor.markdownEditor')"
       :aria-hidden="linkSheetBackgroundAriaHidden"
     >
@@ -618,6 +706,25 @@ onBeforeUnmount(() => {
         autocorrect="off"
         spellcheck="false"
         @input="onSourceInput"
+      />
+
+      <div
+        v-if="splitActive"
+        class="split-divider"
+        :class="{ 'is-dragging': splitDragging }"
+        role="separator"
+        tabindex="0"
+        :aria-label="t('editor.splitView.resize')"
+        aria-valuemin="15"
+        aria-valuemax="85"
+        :aria-valuenow="Math.round(splitRatio * 100)"
+        data-testid="split-divider"
+        @pointerdown="onSplitPointerDown"
+        @pointermove="onSplitPointerMove"
+        @pointerup="onSplitPointerUp"
+        @pointercancel="onSplitPointerUp"
+        @dblclick="setSplitRatio(0.5, true)"
+        @keydown="onSplitKeydown"
       />
 
       <!-- Non-modal offer: never blocks the editor, never scrolls on its own. -->

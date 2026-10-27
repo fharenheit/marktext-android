@@ -107,6 +107,7 @@ export const tr = {
   'editor.actions.exitSourceMode': 'Kaynak modundan çık',
   'editor.actions.splitView': 'Kaynak + WYSIWYG',
   'editor.actions.exitSplitView': 'Kaynak + WYSIWYG\'i kapat',
+  'editor.splitView.resize': 'Kaynak ve WYSIWYG bölmelerini yeniden boyutlandır',
   'editor.sourceMode.aria': 'Markdown kaynağı',
   'editor.actions.exportPdf': 'PDF olarak dışa aktar',
   'editor.actions.saveToDevice': 'Farklı kaydet…',

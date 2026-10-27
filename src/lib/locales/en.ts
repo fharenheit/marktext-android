@@ -103,6 +103,7 @@ export const en = {
   'editor.actions.exitSourceMode': 'Exit source code mode',
   'editor.actions.splitView': 'Source + WYSIWYG',
   'editor.actions.exitSplitView': 'Close source + WYSIWYG',
+  'editor.splitView.resize': 'Resize the source and WYSIWYG panes',
   'editor.sourceMode.aria': 'Markdown source',
   'editor.actions.exportPdf': 'Export as PDF',
   'editor.actions.saveToDevice': 'Save as…',

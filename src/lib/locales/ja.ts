@@ -107,6 +107,7 @@ export const ja = {
   'editor.actions.exitSourceMode': 'ソースコードモードを終了',
   'editor.actions.splitView': 'ソース + WYSIWYG',
   'editor.actions.exitSplitView': 'ソース + WYSIWYG を閉じる',
+  'editor.splitView.resize': 'ソースと WYSIWYG の幅を調整',
   'editor.sourceMode.aria': 'Markdown ソース',
   'editor.actions.exportPdf': 'PDF としてエクスポート',
   'editor.actions.saveToDevice': '名前を付けて保存…',

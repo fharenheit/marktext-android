@@ -107,6 +107,7 @@ export const pt = {
   'editor.actions.exitSourceMode': 'Sair do modo de código-fonte',
   'editor.actions.splitView': 'Código + WYSIWYG',
   'editor.actions.exitSplitView': 'Fechar código + WYSIWYG',
+  'editor.splitView.resize': 'Redimensionar os painéis de código e WYSIWYG',
   'editor.sourceMode.aria': 'Código-fonte Markdown',
   'editor.actions.exportPdf': 'Exportar como PDF',
   'editor.actions.saveToDevice': 'Salvar como…',

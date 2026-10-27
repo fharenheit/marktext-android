@@ -107,6 +107,7 @@ export const zhTW = {
   'editor.actions.exitSourceMode': '離開原始碼模式',
   'editor.actions.splitView': '原始碼 + 所見即所得',
   'editor.actions.exitSplitView': '關閉原始碼 + 所見即所得',
+  'editor.splitView.resize': '調整原始碼與所見即所得窗格大小',
   'editor.sourceMode.aria': 'Markdown 原始碼',
   'editor.actions.exportPdf': '匯出為 PDF',
   'editor.actions.saveToDevice': '另存新檔…',

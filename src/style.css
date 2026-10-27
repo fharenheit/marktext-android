@@ -1099,16 +1099,14 @@ textarea {
    stacked on a narrow portrait phone, where two columns would be unreadably
    thin. The source comes first (left / top). */
 .editor-pane-split {
+  --split-divider: 16px;
+
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
 .editor-pane-split > .source-mode-editor,
 .editor-pane-split > .editor-host-shell {
-  /* Equal 50% bases (not 0): with a zero basis the padded textarea would
-     take its padding on top of an equal share. */
-  flex: 1 1 50%;
   box-sizing: border-box;
   width: auto;
   min-width: 0;
@@ -1119,12 +1117,48 @@ textarea {
 /* Each half is narrower than the single editor column, so the source drops
    its wide-screen gutter and the editor its tall top padding. */
 .editor-pane-split > .source-mode-editor {
+  /* The splitter sets --split-ratio: the source pane's share of the space
+     beside the divider (border-box, so its padding is inside the share). */
+  flex: 0 0 calc((100% - var(--split-divider)) * var(--split-ratio, 0.5));
   order: -1;
   padding: 12px 16px 32px;
 }
 
 .editor-pane-split > .editor-host-shell {
   --editor-gutter: 16px;
+
+  flex: 1 1 0;
+  order: 1;
+}
+
+/* The draggable divider between the panes: a grip line in a touch-sized strip. */
+.split-divider {
+  display: flex;
+  flex: 0 0 var(--split-divider);
+  align-items: center;
+  justify-content: center;
+  order: 0;
+  cursor: row-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.split-divider::before {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--separator);
+  content: '';
+}
+
+.split-divider:hover::before,
+.split-divider:focus-visible::before,
+.split-divider.is-dragging::before {
+  background: var(--accent);
+}
+
+.split-divider:focus-visible {
+  outline: none;
 }
 
 .editor-pane-split > .editor-host-shell .mu-editor {
@@ -1134,6 +1168,15 @@ textarea {
 @media (min-width: 600px) {
   .editor-pane-split {
     flex-direction: row;
+  }
+
+  .split-divider {
+    cursor: col-resize;
+  }
+
+  .split-divider::before {
+    width: 4px;
+    height: 40px;
   }
 }
 

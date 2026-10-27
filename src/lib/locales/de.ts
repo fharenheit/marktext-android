@@ -108,6 +108,7 @@ export const de = {
   'editor.actions.exitSourceMode': 'Quelltextmodus verlassen',
   'editor.actions.splitView': 'Quelltext + WYSIWYG',
   'editor.actions.exitSplitView': 'Quelltext + WYSIWYG schließen',
+  'editor.splitView.resize': 'Größe von Quelltext- und WYSIWYG-Bereich ändern',
   'editor.sourceMode.aria': 'Markdown-Quelltext',
   'editor.actions.exportPdf': 'Als PDF exportieren',
   'editor.actions.saveToDevice': 'Speichern unter …',

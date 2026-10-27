@@ -104,6 +104,7 @@ export const zhCN = {
   'editor.actions.exitSourceMode': '退出源代码模式',
   'editor.actions.splitView': '源码 + 所见即所得',
   'editor.actions.exitSplitView': '关闭源码 + 所见即所得',
+  'editor.splitView.resize': '调整源码与所见即所得窗格大小',
   'editor.sourceMode.aria': 'Markdown 源码',
   'editor.actions.exportPdf': '导出为 PDF',
   'editor.actions.saveToDevice': '另存为…',

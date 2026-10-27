@@ -14,6 +14,8 @@ async function snapshot(page: Page, name: string) {
 async function toggleSplitView(page: Page) {
   await page.getByTestId('editor-menu-button').click()
   await page.getByTestId('split-view-toggle-button').click()
+  // The menu sheet animates out over the panes; wait until it is gone.
+  await expect(page.getByTestId('editor-action-sheet')).toHaveCount(0)
 }
 
 test('source edits flow into the WYSIWYG pane without taking the keyboard', async ({ page }) => {
@@ -93,4 +95,65 @@ test('wide screens show the source and the WYSIWYG editor side by side', async (
   expect(Math.abs(wysiwygBox.y - sourceBox.y)).toBeLessThan(2)
   expect(Math.abs(wysiwygBox.width - sourceBox.width)).toBeLessThan(2)
   await snapshot(page, 'split-03-wide')
+})
+
+async function dragDivider(page: Page, dx: number, dy: number) {
+  const box = (await page.getByTestId('split-divider').boundingBox())!
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + dx / 2, y + dy / 2)
+  await page.mouse.move(x + dx, y + dy)
+  await page.mouse.up()
+}
+
+test('dragging the splitter resizes the stacked panes and is remembered', async ({ page }) => {
+  await openLocalDraft(page, { id: 'split', title: 'Split title', markdown: MARKDOWN })
+  await toggleSplitView(page)
+  const source = page.getByTestId('source-mode-editor')
+  const wysiwyg = page.getByTestId('editor-host')
+  const before = (await source.boundingBox())!.height
+  expect(Math.abs(before - (await wysiwyg.boundingBox())!.height)).toBeLessThan(4)
+
+  await dragDivider(page, 0, -120)
+  const after = (await source.boundingBox())!.height
+  expect(after).toBeLessThan(before - 100)
+  expect((await wysiwyg.boundingBox())!.height).toBeGreaterThan(before + 100)
+  await snapshot(page, 'split-04-resized')
+
+  // Clamped so neither pane can vanish.
+  await dragDivider(page, 0, -2000)
+  expect((await source.boundingBox())!.height).toBeGreaterThan(40)
+
+  // Reopening the split keeps the chosen size.
+  await dragDivider(page, 0, 60)
+  const chosen = (await source.boundingBox())!.height
+  await toggleSplitView(page)
+  await expectEditorReady(page)
+  await toggleSplitView(page)
+  expect(Math.abs((await source.boundingBox())!.height - chosen)).toBeLessThan(4)
+
+  // Double-tap puts it back in the middle.
+  await page.getByTestId('split-divider').dblclick()
+  expect(Math.abs((await source.boundingBox())!.height - (await wysiwyg.boundingBox())!.height)).toBeLessThan(4)
+})
+
+test('on wide screens the splitter resizes sideways and from the keyboard', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 700 })
+  await openLocalDraft(page, { id: 'split', title: 'Split title', markdown: MARKDOWN })
+  await toggleSplitView(page)
+  const source = page.getByTestId('source-mode-editor')
+  const wysiwyg = page.getByTestId('editor-host')
+
+  await dragDivider(page, 150, 0)
+  expect((await source.boundingBox())!.width).toBeGreaterThan((await wysiwyg.boundingBox())!.width + 250)
+  await snapshot(page, 'split-05-wide-resized')
+
+  const divider = page.getByTestId('split-divider')
+  await divider.focus()
+  const width = (await source.boundingBox())!.width
+  await page.keyboard.press('ArrowLeft')
+  expect((await source.boundingBox())!.width).toBeLessThan(width - 20)
+  await expect(divider).toHaveAttribute('aria-valuenow', /\d+/)
 })

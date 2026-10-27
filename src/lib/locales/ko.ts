@@ -107,6 +107,7 @@ export const ko = {
   'editor.actions.exitSourceMode': '소스 모드 종료',
   'editor.actions.splitView': '소스 + 위지윅',
   'editor.actions.exitSplitView': '소스 + 위지윅 닫기',
+  'editor.splitView.resize': '소스와 위지윅 창 크기 조절',
   'editor.sourceMode.aria': 'Markdown 소스',
   'editor.actions.exportPdf': 'PDF로 내보내기',
   'editor.actions.saveToDevice': '다른 이름으로 저장…',
