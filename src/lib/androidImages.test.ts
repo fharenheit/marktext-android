@@ -1,12 +1,33 @@
+// @vitest-environment happy-dom
+
 import { describe, expect, it } from 'vitest'
 import {
   AndroidImageError,
   collectMarkTextLocalImageFileNames,
+  ensureAndroidImageResolver,
   formatImportedImageStorageBytes,
   resolveMarkTextImageSource,
+  setDocumentImageResolver,
 } from './androidImages'
 
 describe('androidImages', () => {
+  it('consults the document resolver only for sources the MarkText scheme leaves', async () => {
+    await ensureAndroidImageResolver()
+    const resolve = (window as Window & {
+      MarkTextAndroidImageResolver?: (source: string) => string | null
+    }).MarkTextAndroidImageResolver!
+    setDocumentImageResolver(source => (source === 'img/a.png' ? 'https://localhost/doc/a.png' : null))
+
+    try {
+      expect(resolve('img/a.png')).toBe('https://localhost/doc/a.png')
+      expect(resolve('other.png')).toBeNull()
+      expect(resolve('marktext-image://android/content%3A%2F%2Fmedia%2F1')).toBe('content://media/1')
+    } finally {
+      setDocumentImageResolver(null)
+    }
+    expect(resolve('img/a.png')).toBeNull()
+  })
+
   it('resolves app-local Markdown image sources', () => {
     expect(
       resolveMarkTextImageSource('marktext-image://local/picked%20image.png', {

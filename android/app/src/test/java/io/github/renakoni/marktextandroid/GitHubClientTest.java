@@ -470,4 +470,51 @@ public class GitHubClientTest {
         assertEquals("octocat", new GitHubClient(transport).getLogin("TOKEN"));
         assertEquals("https://api.github.com/user", transport.requests.get(0).url);
     }
+
+    @Test
+    public void pathsWithDotOrEmptySegmentsAreRejected() throws Exception {
+        assertFailsWith("INVALID_CLOUD_FILE_ID", () -> GitHubClient.Location.parse("o/r/main/..%2Fsecret.md"));
+        assertFailsWith("INVALID_CLOUD_FILE_ID", () -> GitHubClient.Location.parse("o/r/main/a%2F.%2Fb.md"));
+        assertFailsWith("INVALID_CLOUD_FILE_ID", () -> GitHubClient.Location.parse("o/r/main/a%2F%2Fb.md"));
+    }
+
+    @Test
+    public void blobLinksResolveTheShortestRefNamingAFile() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.enqueue(404, "{\"message\":\"Not Found\"}");
+        transport.enqueue(200, "{\"type\":\"file\",\"name\":\"a.md\",\"path\":\"docs/a.md\",\"sha\":\"s\"}");
+
+        GitHubClient.Location location = new GitHubClient(transport).resolveBlobLink(
+            "T", "octocat", "hello", java.util.Arrays.asList("feature", "x", "docs", "a.md"));
+
+        assertEquals("feature/x", location.ref);
+        assertEquals("docs/a.md", location.path);
+        assertEquals("https://api.github.com/repos/octocat/hello/contents/x/docs/a.md?ref=feature",
+            transport.requests.get(0).url);
+        assertEquals("https://api.github.com/repos/octocat/hello/contents/docs/a.md?ref=feature%2Fx",
+            transport.requests.get(1).url);
+    }
+
+    @Test
+    public void blobLinksThatNameNothingReadAsNotFound() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.enqueue(404, "{}");
+
+        assertFailsWith("CLOUD_DOCUMENT_NOT_FOUND", () -> new GitHubClient(transport)
+            .resolveBlobLink("T", "o", "r", java.util.Arrays.asList("main", "a.md")));
+        assertFailsWith("INVALID_CLOUD_FILE_ID", () -> new GitHubClient(new FakeTransport())
+            .resolveBlobLink("T", "o", "r", java.util.Arrays.asList("main", "..", "a.md")));
+        assertFailsWith("INVALID_CLOUD_FILE_ID", () -> new GitHubClient(new FakeTransport())
+            .resolveBlobLink("T", "..", "r", java.util.Arrays.asList("main", "a.md")));
+    }
+
+    @Test
+    public void rawReadsCapTheSize() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.enqueue(200, "0123456789");
+
+        assertFailsWith("DOCUMENT_TOO_LARGE", () -> new GitHubClient(transport)
+            .readRaw("T", GitHubClient.Location.parse("o/r/main/a.png"), 4));
+        assertEquals(4, transport.requests.get(0).maxResponseBytes);
+    }
 }

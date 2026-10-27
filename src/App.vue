@@ -26,11 +26,15 @@ import {
   isCloudDocumentAccessAvailable,
   listCloudFolder,
   readCloudDocument,
+  resolveGitHubLink,
+  setCloudImageContext,
   type CloudAccountState,
   type CloudFolderEntry,
 } from './lib/cloudDocuments'
 import { createGoogleDrivePickFlow } from './features/open-locations/googleDrivePickFlow'
-import { isCloudSourceUri } from './lib/cloudDocumentUris'
+import { isCloudSourceUri, parseCloudSourceUri } from './lib/cloudDocumentUris'
+import { resolveGitHubImageSource } from './features/cloud-documents/githubImages'
+import type { GitHubDocumentLink } from './features/cloud-documents/githubLinks'
 import {
   createRoutedCloudDocument,
   readRoutedMarkdownDocument,
@@ -48,6 +52,7 @@ import {
   getAndroidImageUserMessage,
   isAndroidImageImportAvailable,
   pickAndroidImageDocument,
+  setDocumentImageResolver,
   type ImportedAndroidImageCleanupResult,
 } from './lib/androidImages'
 import {
@@ -1520,6 +1525,28 @@ const {
   documentLogger: androidDocumentLog,
   draftLogger: draftLog,
 })
+// Relative images of a GitHub document load from its repository through
+// the native image endpoint (private repositories included). Synchronous,
+// so the resolver is in place before the opened document first renders.
+watch(
+  () => documentState.value.sourceUri,
+  sourceUri => {
+    const cloud = parseCloudSourceUri(sourceUri)
+    const fileId = cloud?.provider === 'github' ? cloud.fileId : null
+    setDocumentImageResolver(
+      fileId === null
+        ? null
+        : source => resolveGitHubImageSource(source, fileId, window.location.origin),
+    )
+    if (isCloudDocumentAccessAvailable()) {
+      setCloudImageContext('github', fileId).catch(error => {
+        androidDocumentLog.warn('GitHub image context update failed', { error })
+      })
+    }
+  },
+  { flush: 'sync', immediate: true },
+)
+
 // --- GitHub commits: the only way edits of a commit-only document reach
 // the repository (autosave keeps them as a recovery draft meanwhile).
 
@@ -2562,6 +2589,13 @@ function discardAndroidChangesAndShowHome() {
 
 // An incoming Intent could not durably preserve the current document. Keep the
 // editor mounted and let the user decide instead of silently replacing it.
+/** Shared github.com file links open the repository document itself. */
+async function loadGitHubLink(link: GitHubDocumentLink) {
+  const fileId = await resolveGitHubLink(link)
+  const content = await readCloudDocument('github', fileId, androidMarkdownSettings.value)
+  return toOpenedDocumentFromCloud('github', content)
+}
+
 function confirmIncomingOpenAfterBlockedPreserve(request: {
   incomingName: string
   proceed: () => Promise<void>
@@ -2790,6 +2824,7 @@ const incomingDocuments = createIncomingDocumentOrchestration({
   canPersistLocalDrafts,
   persistLocalDrafts,
   confirmIncomingOpenAfterBlockedPreserve,
+  loadGitHubLink,
   getAndroidDocumentUserMessage,
   appLogger: appLog,
   documentLogger: androidDocumentLog,

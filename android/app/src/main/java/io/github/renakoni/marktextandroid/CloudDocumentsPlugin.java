@@ -75,6 +75,11 @@ public class CloudDocumentsPlugin extends Plugin {
      * superseded sign-in can never save tokens.
      */
     private int githubDeviceGeneration = 0;
+    private final GitHubImageServer githubImageServer = new GitHubImageServer(
+        githubClient,
+        // Qualified: a bare reference to the later-declared field is illegal here.
+        () -> requireFreshTokens(this.githubAuth).accessToken
+    );
 
     /**
      * Per-provider wiring for the shared OAuth machinery: the pending/token
@@ -302,6 +307,11 @@ public class CloudDocumentsPlugin extends Plugin {
     @Override
     public void load() {
         super.load();
+        // Plugins load before the bridge loads its first page, so the
+        // image endpoint is in place for every request.
+        if (getBridge() != null) {
+            getBridge().setWebViewClient(new GitHubImageWebViewClient(getBridge(), githubImageServer));
+        }
         Activity activity = getActivity();
         if (activity != null) {
             // A cold-start redirect arrives as the launch intent, never
@@ -437,6 +447,67 @@ public class CloudDocumentsPlugin extends Plugin {
         call.resolve(new JSObject());
     }
 
+    /**
+     * Scopes the GitHub image endpoint to the open document's repository
+     * and branch; an empty or non-GitHub id turns it off.
+     */
+    @PluginMethod
+    public void setCloudImageContext(PluginCall call) {
+        String provider = call.getString("provider", "");
+        String fileId = call.getString("fileId", "");
+        GitHubClient.Location location = null;
+        if (PROVIDER_GITHUB.equals(provider) && fileId.length() > 0) {
+            try {
+                location = GitHubClient.Location.parse(fileId);
+            } catch (CloudProviderException ex) {
+                call.reject(ex.getMessage(), ex.code, ex);
+                return;
+            }
+        }
+        githubImageServer.setContext(location);
+        call.resolve(new JSObject());
+    }
+
+    /**
+     * Turns a github.com blob link into a document id. The ref/path split
+     * of such links is ambiguous (branch names may contain slashes), so it
+     * is resolved against GitHub.
+     */
+    @PluginMethod
+    public void resolveGitHubLink(PluginCall call) {
+        String owner = call.getString("owner", "");
+        String repo = call.getString("repo", "");
+        JSArray segmentValues = call.getArray("segments", new JSArray());
+        List<String> segments = new java.util.ArrayList<>();
+        for (int index = 0; index < segmentValues.length(); index++) {
+            String segment = segmentValues.optString(index, "");
+            if (segment.length() > 0) {
+                segments.add(segment);
+            }
+        }
+        if (segments.size() < 2 || !OneDriveGraphClient.isListableDocumentName(segments.get(segments.size() - 1))) {
+            call.reject("This GitHub link does not point to a Markdown document", "UNSUPPORTED_DOCUMENT");
+            return;
+        }
+
+        cloudExecutor.execute(() -> {
+            try {
+                CloudTokenStore tokens = requireFreshTokens(githubAuth);
+                GitHubClient.Location location =
+                    githubClient.resolveBlobLink(tokens.accessToken, owner, repo, segments);
+                JSObject result = new JSObject();
+                result.put("fileId", location.serialize());
+                call.resolve(result);
+            } catch (CloudProviderException ex) {
+                Log.w(TAG, "GitHub link resolution failed: " + ex.getMessage());
+                call.reject(ex.getMessage(), ex.code, ex);
+            } catch (IOException ex) {
+                Log.w(TAG, "GitHub link resolution failed", ex);
+                call.reject("Could not reach GitHub", "CLOUD_NETWORK_FAILED", ex);
+            }
+        });
+    }
+
     @PluginMethod
     public void disconnectCloudAccount(PluginCall call) {
         String provider = call.getString("provider", "");
@@ -457,6 +528,7 @@ public class CloudDocumentsPlugin extends Plugin {
         if (auth == githubAuth) {
             // A sign-in still polling would otherwise reconnect right after.
             cancelGitHubDeviceFlow();
+            githubImageServer.clear();
         }
         CloudTokenStore tokens = readTokens(auth);
         cloudPrefs()
@@ -565,6 +637,10 @@ public class CloudDocumentsPlugin extends Plugin {
                     canWrite = file.canWrite;
                     bytes = file.bytes;
                     pathHint = location.describe();
+                    // Scope the image endpoint before the editor renders;
+                    // the web layer's own context call can arrive after the
+                    // first image requests.
+                    githubImageServer.setContext(location);
                 } else if (auth == googleDriveAuth) {
                     GoogleDriveClient.FileContent file = driveClient.readFile(
                         tokens.accessToken,

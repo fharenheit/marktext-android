@@ -6,6 +6,8 @@ import { getAndroidDocumentUserMessage, AndroidDocumentError } from '../../lib/a
 import { createUntitledDocument } from '../../lib/documentState'
 import type { AppScreen } from '../../lib/appExitDecisions'
 import type { LocalDraftRecord } from '../../lib/localDrafts'
+import type { OpenedAndroidDocument } from '../../lib/androidDocuments'
+import type { GitHubDocumentLink } from '../cloud-documents/githubLinks'
 
 vi.mock('./androidDocumentIntentListeners', () => ({
   installAndroidDocumentIntentListeners: vi.fn(() => ({ remove: vi.fn() })),
@@ -47,6 +49,7 @@ function createOrchestration(overrides: {
   recoveryKept?: boolean
   canPersistDrafts?: boolean
   localDrafts?: LocalDraftRecord[]
+  loadGitHubLink?: (link: GitHubDocumentLink) => Promise<OpenedAndroidDocument>
 } = {}) {
   const options = {
     currentScreen: ref<AppScreen>(overrides.currentScreen ?? 'home'),
@@ -79,6 +82,7 @@ function createOrchestration(overrides: {
     canPersistLocalDrafts: () => overrides.canPersistDrafts ?? true,
     persistLocalDrafts: vi.fn(),
     confirmIncomingOpenAfterBlockedPreserve: vi.fn(),
+    loadGitHubLink: overrides.loadGitHubLink,
     getAndroidDocumentUserMessage,
     appLogger: noopLogger,
     documentLogger: noopLogger,
@@ -533,6 +537,71 @@ describe('incomingDocumentOrchestration', () => {
 
     expect(options.persistLocalDrafts).not.toHaveBeenCalled()
     expect(options.openEditor).toHaveBeenCalledWith('# Shared note')
+  })
+
+  describe('shared GitHub links', () => {
+    const githubDocument = {
+      ...incomingDocument,
+      sourceUri: 'cloud:github:octocat/hello/main/README.md',
+      displayName: 'README.md',
+      providerName: 'GitHub',
+    }
+    const linkShare = {
+      ...sharedTextDocument,
+      markdown: 'README.md at main · octocat/hello\nhttps://github.com/octocat/hello/blob/main/README.md',
+    }
+
+    it('opens the repository document instead of importing the link text', async () => {
+      const loadGitHubLink = vi.fn().mockResolvedValue(githubDocument)
+      const { orchestration, options } = createOrchestration({ loadGitHubLink })
+
+      await orchestration.handleShareDocumentEvent({ document: linkShare, error: null })
+
+      expect(loadGitHubLink).toHaveBeenCalledWith({
+        owner: 'octocat',
+        repo: 'hello',
+        segments: ['main', 'README.md'],
+      })
+      expect(options.openAndroidDocumentResult).toHaveBeenCalledWith(githubDocument, {
+        source: 'share',
+      })
+      expect(options.persistLocalDrafts).not.toHaveBeenCalled()
+      expect(options.openEditor).not.toHaveBeenCalled()
+    })
+
+    it('leaves the open document untouched when the link cannot be loaded', async () => {
+      const loadGitHubLink = vi.fn().mockRejectedValue(
+        new AndroidDocumentError('CLOUD_NOT_CONNECTED', 'No GitHub account is connected'),
+      )
+      const { orchestration, options } = createOrchestration({
+        currentScreen: 'editor',
+        hasEditor: true,
+        documentState: createUntitledDocument({ markdown: '# Draft', autosaveTarget: 'local-draft' }),
+        loadGitHubLink,
+      })
+
+      await orchestration.handleShareDocumentEvent({ document: linkShare, error: null })
+
+      expect(options.saveDraft).not.toHaveBeenCalled()
+      expect(options.openAndroidDocumentResult).not.toHaveBeenCalled()
+      expect(options.homeNotice.value).toBe('Sign in to the cloud account to open this document.')
+    })
+
+    it('keeps text that only mentions a link a text share', async () => {
+      const loadGitHubLink = vi.fn()
+      const { orchestration, options } = createOrchestration({ loadGitHubLink })
+
+      await orchestration.handleShareDocumentEvent({
+        document: {
+          ...sharedTextDocument,
+          markdown: '# Notes\n\nSee https://github.com/octocat/hello/blob/main/README.md\nlater',
+        },
+        error: null,
+      })
+
+      expect(loadGitHubLink).not.toHaveBeenCalled()
+      expect(options.openEditor).toHaveBeenCalled()
+    })
   })
 
   it('installs intent listeners once and can reinstall after removal', () => {

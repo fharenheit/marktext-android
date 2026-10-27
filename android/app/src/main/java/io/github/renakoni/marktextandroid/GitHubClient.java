@@ -43,6 +43,8 @@ final class GitHubClient {
     static final String DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
     /** Follow at most this many Link rel="next" pages per listing. */
     static final int MAX_LIST_PAGES = 10;
+    /** Longest branch name (in slash-separated segments) a link split tries. */
+    static final int MAX_LINK_REF_SEGMENTS = 5;
     /** GitHub asks clients to add 5 seconds to the interval on slow_down. */
     static final int SLOW_DOWN_STEP_SECONDS = 5;
 
@@ -194,10 +196,23 @@ final class GitHubClient {
             }
             String ref = decodePathSegment(parts[2]);
             String path = parts.length == 4 ? decodePathSegment(parts[3]) : "";
-            if (ref.length() == 0 || (parts.length == 4 && path.length() == 0)) {
+            if (ref.length() == 0 || (parts.length == 4 && !isValidPath(path))) {
                 throw invalidId();
             }
             return new Location(parts[0], parts[1], ref, path);
+        }
+
+        /** Non-empty segments only, and no dot segments: the path lands in API URLs. */
+        private static boolean isValidPath(String path) {
+            if (path.length() == 0) {
+                return false;
+            }
+            for (String segment : path.split("/", -1)) {
+                if (segment.length() == 0 || segment.equals(".") || segment.equals("..")) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private static boolean isValidName(String value) {
@@ -486,8 +501,25 @@ final class GitHubClient {
             );
         }
 
-        // The raw media type returns the bytes directly (no base64, and no
-        // 1 MB cap of the inline JSON content).
+        byte[] bytes = readRaw(accessToken, location, maxBytes);
+        return new FileContent(
+            metadata.optString("name", ""),
+            metadata.optString("path", location.path),
+            metadata.optString("sha", ""),
+            bytes,
+            canPush(accessToken, location)
+        );
+    }
+
+    /**
+     * The file's bytes through the raw media type: no base64, and no 1 MB
+     * cap of the inline JSON content. Also serves repository images.
+     */
+    byte[] readRaw(String accessToken, Location location, int maxBytes)
+        throws IOException, CloudProviderException {
+        if (location.ref == null || location.path.length() == 0) {
+            throw new CloudProviderException("INVALID_CLOUD_FILE_ID", "The GitHub location is not a file");
+        }
         Map<String, String> rawHeaders = apiHeaders(accessToken);
         rawHeaders.put("Accept", "application/vnd.github.raw");
         HttpTransport.Response download = transport.execute(new HttpTransport.Request(
@@ -504,16 +536,68 @@ final class GitHubClient {
         if (bytes.length > maxBytes) {
             throw new CloudProviderException(
                 "DOCUMENT_TOO_LARGE",
-                "Markdown document is larger than the current 5 MB limit"
+                "The GitHub file is larger than the " + (maxBytes / (1024 * 1024)) + " MB limit"
             );
         }
-        return new FileContent(
-            metadata.optString("name", ""),
-            metadata.optString("path", location.path),
-            metadata.optString("sha", ""),
-            bytes,
-            canPush(accessToken, location)
+        return bytes;
+    }
+
+    /**
+     * Splits a blob link's {@code <ref>/<path>} tail. Branch names may
+     * contain slashes, so the URL alone is ambiguous: the shortest ref whose
+     * remainder names a file on GitHub wins, which matches how GitHub itself
+     * resolves these links for all but pathological branch layouts.
+     *
+     * @param segments the decoded path segments after {@code /blob/}
+     */
+    Location resolveBlobLink(String accessToken, String owner, String repo, List<String> segments)
+        throws IOException, CloudProviderException {
+        Location repoLocation = Location.parse(owner + "/" + repo);
+        int maxRefSegments = Math.min(segments.size() - 1, MAX_LINK_REF_SEGMENTS);
+        for (int refSegments = 1; refSegments <= maxRefSegments; refSegments++) {
+            String ref = joinSegments(segments.subList(0, refSegments));
+            String path = joinSegments(segments.subList(refSegments, segments.size()));
+            if (ref.length() == 0 || path.length() == 0) {
+                continue;
+            }
+            // Round-trip through parse: the segments come from a shared link
+            // and must pass the same validation as browser ids.
+            Location candidate = Location.parse(
+                new Location(repoLocation.owner, repoLocation.repo, ref, path).serialize());
+            HttpTransport.Response response = transport.execute(new HttpTransport.Request(
+                "GET",
+                contentsUrl(candidate),
+                apiHeaders(accessToken),
+                null
+            ));
+            if (response.status == 404) {
+                continue;
+            }
+            if (response.status != 200) {
+                throw statusException(response, "CLOUD_REQUEST_FAILED", "GitHub request failed");
+            }
+            JSONObject metadata = parseJson(response.body);
+            if (metadata == null || !"file".equals(metadata.optString("type", ""))) {
+                throw new CloudProviderException("CLOUD_READ_FAILED", "This GitHub link does not point to a file");
+            }
+            return candidate;
+        }
+        throw new CloudProviderException(
+            "CLOUD_DOCUMENT_NOT_FOUND",
+            "This GitHub document was moved, deleted, or is not accessible"
         );
+    }
+
+    /** String.join is API 26; minSdk is 24. */
+    private static String joinSegments(List<String> segments) {
+        StringBuilder joined = new StringBuilder();
+        for (String segment : segments) {
+            if (joined.length() > 0) {
+                joined.append('/');
+            }
+            joined.append(segment);
+        }
+        return joined.toString();
     }
 
     /**

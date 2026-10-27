@@ -50,6 +50,17 @@ const MARKTEXT_ANDROID_IMAGE_SOURCE_REGEXP = /^marktext-image:\/\/android\/([^/?
 const MARKTEXT_LOCAL_IMAGE_REFERENCE_REGEXP = /marktext-image:\/\/local\/([^/?#\s"'<>()[\]]+)/gi
 
 let imageDirectory: ImportedAndroidImageDirectory | null = null
+// Resolves sources relative to the open document (GitHub repositories);
+// consulted only for sources the MarkText image scheme does not claim.
+let documentImageResolver: ((source: string) => string | null) | null = null
+
+export function setDocumentImageResolver(resolver: ((source: string) => string | null) | null) {
+  documentImageResolver = resolver
+}
+
+function resolveImageSource(source: string) {
+  return resolveMarkTextImageSource(source, imageDirectory) ?? documentImageResolver?.(source) ?? null
+}
 
 export function isAndroidImageImportAvailable() {
   return Capacitor.getPlatform() === 'android' && Capacitor.isNativePlatform()
@@ -114,7 +125,7 @@ export function getImportedAndroidImageDirectory() {
 export async function ensureAndroidImageResolver() {
   const win = window as AndroidImageResolverWindow
   if (!isAndroidImageImportAvailable()) {
-    win.MarkTextAndroidImageResolver = source => resolveMarkTextImageSource(source, imageDirectory)
+    win.MarkTextAndroidImageResolver = resolveImageSource
     return
   }
 
@@ -122,7 +133,7 @@ export async function ensureAndroidImageResolver() {
     imageDirectory = normalizeImageDirectory(await AndroidDocuments.getImportedImageDirectory())
   }
 
-  win.MarkTextAndroidImageResolver = source => resolveMarkTextImageSource(source, imageDirectory)
+  win.MarkTextAndroidImageResolver = resolveImageSource
 }
 
 export async function pickAndroidImageDocument(

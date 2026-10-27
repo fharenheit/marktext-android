@@ -22,6 +22,7 @@ import type { AppScreen } from '../../lib/appExitDecisions'
 import type { MarkdownDocumentState } from '../../lib/documentState'
 import { upsertLocalDraft, type LocalDraftRecord } from '../../lib/localDrafts'
 import type { SaveAndroidDocumentOptions } from '../document-session/currentDocumentPersistence'
+import { findSharedGitHubLink, type GitHubDocumentLink } from '../cloud-documents/githubLinks'
 
 interface OrchestrationLogger {
   info(message: string, context?: unknown): void
@@ -82,6 +83,12 @@ export interface IncomingDocumentOrchestrationOptions {
   // Called instead of replacing the editor when preservation was blocked: keep
   // the current editor mounted and let the user keep editing or discard + open.
   confirmIncomingOpenAfterBlockedPreserve: (request: BlockedIncomingOpenRequest) => void
+  /**
+   * Loads the document a shared GitHub file link points at. Shares that are
+   * just such a link open the repository document instead of importing the
+   * URL text as a draft. Absent, links stay text shares.
+   */
+  loadGitHubLink?: (link: GitHubDocumentLink) => Promise<OpenedAndroidDocument>
   getAndroidDocumentUserMessage: (error: unknown) => string
   appLogger: OrchestrationLogger
   documentLogger: OrchestrationLogger
@@ -333,6 +340,23 @@ export function createIncomingDocumentOrchestration(
           }
         }),
       )
+      return
+    }
+
+    const githubLink = options.loadGitHubLink && action.document.shareKind === 'text'
+      ? findSharedGitHubLink(action.document.markdown)
+      : null
+    if (githubLink && options.loadGitHubLink) {
+      const loadGitHubLink = options.loadGitHubLink
+      await scheduleIncomingTransaction(async () => {
+        // Load before preserving: a link that cannot be opened (signed
+        // out, no access) must leave the current document untouched.
+        const document = await loadGitHubLink(githubLink)
+        await runIncomingTransaction(document.displayName, async () => {
+          closeEditorChromeForIncomingOpen()
+          await options.openAndroidDocumentResult(document, { source: 'share' })
+        })
+      })
       return
     }
 

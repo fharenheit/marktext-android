@@ -94,6 +94,12 @@ interface CloudDocumentsPlugin {
     pickMode?: CloudPickMode
   }): Promise<CloudConnectResult>
   cancelCloudAuth(options: { provider: CloudProviderId }): Promise<void>
+  setCloudImageContext(options: { provider: CloudProviderId | ''; fileId: string }): Promise<void>
+  resolveGitHubLink(options: {
+    owner: string
+    repo: string
+    segments: string[]
+  }): Promise<{ fileId: string }>
   disconnectCloudAccount(options: { provider: CloudProviderId }): Promise<void>
   listCloudFolder(options: {
     provider: CloudProviderId
@@ -157,6 +163,24 @@ export async function connectCloudAccount(
   return wrapCloudErrors(() =>
     CloudDocuments.connectCloudAccount({ provider, pickMode: options.pickMode }),
   )
+}
+
+/**
+ * Scopes the native GitHub image endpoint to the open document's repository
+ * and branch; null turns it off.
+ */
+export async function setCloudImageContext(provider: CloudProviderId, fileId: string | null) {
+  return wrapCloudErrors(() =>
+    CloudDocuments.setCloudImageContext(
+      fileId === null ? { provider: '', fileId: '' } : { provider, fileId },
+    ),
+  )
+}
+
+/** Resolves a github.com file link (owner, repo, `<ref>/<path>` segments) to a document id. */
+export async function resolveGitHubLink(link: { owner: string; repo: string; segments: string[] }) {
+  const result = await wrapCloudErrors(() => CloudDocuments.resolveGitHubLink(link))
+  return result.fileId
 }
 
 /** Abandons a pending device-flow sign-in; no-op for browser sign-ins. */
