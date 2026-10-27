@@ -3,7 +3,7 @@ import { AndroidDocumentError, isAndroidDocumentAccessAvailable } from './androi
 import type { AndroidMarkdownSettings } from '../features/settings/advancedSettings'
 import type { MarkdownEncoding } from '../features/settings/advancedSettings'
 
-export type CloudProviderId = 'onedrive' | 'googledrive' | 'webdav'
+export type CloudProviderId = 'onedrive' | 'googledrive' | 'github' | 'webdav'
 
 export interface CloudAccountState {
   connected: boolean
@@ -29,6 +29,8 @@ export interface CloudDocumentContent {
   eTag: string
   providerName: string
   canWrite: boolean
+  /** Location shown in recents, e.g. `owner/repo@branch/docs/a.md` on GitHub. */
+  pathHint?: string
 }
 
 export interface CloudDocumentWriteResult {
@@ -36,6 +38,20 @@ export interface CloudDocumentWriteResult {
   displayName: string
   eTag: string
   lastModified: string
+}
+
+/**
+ * GitHub signs in with the device flow: the user enters `userCode` at
+ * `verificationUri` while the plugin polls, and the outcome arrives as a
+ * regular `cloudAuthCompleted` event. Browser-based providers resolve with
+ * `started` only.
+ */
+export interface CloudConnectResult {
+  started: boolean
+  userCode?: string
+  verificationUri?: string
+  /** Seconds until the device code expires. */
+  expiresIn?: number
 }
 
 /** 'document' opens the file picker; 'folder' picks a save-as destination. */
@@ -76,7 +92,8 @@ interface CloudDocumentsPlugin {
   connectCloudAccount(options: {
     provider: CloudProviderId
     pickMode?: CloudPickMode
-  }): Promise<{ started: boolean }>
+  }): Promise<CloudConnectResult>
+  cancelCloudAuth(options: { provider: CloudProviderId }): Promise<void>
   disconnectCloudAccount(options: { provider: CloudProviderId }): Promise<void>
   listCloudFolder(options: {
     provider: CloudProviderId
@@ -139,6 +156,11 @@ export async function connectCloudAccount(
   return wrapCloudErrors(() =>
     CloudDocuments.connectCloudAccount({ provider, pickMode: options.pickMode }),
   )
+}
+
+/** Abandons a pending device-flow sign-in; no-op for browser sign-ins. */
+export async function cancelCloudAuth(provider: CloudProviderId) {
+  return wrapCloudErrors(() => CloudDocuments.cancelCloudAuth({ provider }))
 }
 
 export async function disconnectCloudAccount(provider: CloudProviderId) {

@@ -6,13 +6,15 @@ withDefaults(
   defineProps<{
     oneDriveState: CloudAccountState | null
     googleDriveState: CloudAccountState | null
+    /** Omitted on the save page: GitHub documents open read-only for now. */
+    githubState?: CloudAccountState | null
     /** Google flow feedback: browser trip / exchanging tokens / opening the pick. */
     googleDriveBusy: 'connecting' | 'completing' | 'opening' | null
     notice: string | null
     /** 'save' turns the page into the save-as destination chooser. */
     mode?: 'open' | 'save'
   }>(),
-  { mode: 'open' },
+  { mode: 'open', githubState: null },
 )
 
 const emit = defineEmits<{
@@ -20,8 +22,10 @@ const emit = defineEmits<{
   openThisPhone: []
   openOneDrive: []
   openGoogleDrive: []
+  openGitHub: []
   disconnectOneDrive: []
   disconnectGoogleDrive: []
+  disconnectGitHub: []
   browseAll: []
 }>()
 
@@ -160,6 +164,58 @@ const { t } = useI18n()
           class="open-location-signout"
           :aria-label="t('cloudBrowser.disconnect')"
           @click="emit('disconnectGoogleDrive')"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path
+              d="M14 6V4.8A1.3 1.3 0 0 0 12.7 3.5H5.8A1.3 1.3 0 0 0 4.5 4.8v14.4a1.3 1.3 0 0 0 1.3 1.3h6.9a1.3 1.3 0 0 0 1.3-1.3V18m2-9.5 3.5 3.5-3.5 3.5M9.5 12H19"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <div v-if="mode !== 'save'" class="open-location-row-group">
+        <button
+          type="button"
+          class="open-location-row"
+          :disabled="githubState !== null && !githubState.available"
+          @click="emit('openGitHub')"
+        >
+          <span class="open-location-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24">
+              <path
+                d="M6.5 4.5v15M6.5 8.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm11-11a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 0v1.5a4 4 0 0 1-4 4h-3a4 4 0 0 0-4 4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
+          <span class="open-location-text">
+            <span class="open-location-label">GitHub</span>
+            <span class="open-location-subtitle">
+              <template v-if="githubState === null">…</template>
+              <template v-else-if="!githubState.available">{{ t('openLocations.cloudUnavailable') }}</template>
+              <template v-else-if="githubState.connected && githubState.accountName">
+                {{ githubState.accountName }}
+              </template>
+              <template v-else-if="githubState.connected">{{ t('openLocations.githubSubtitle') }}</template>
+              <template v-else>{{ t('openLocations.cloudSignIn') }}</template>
+            </span>
+          </span>
+        </button>
+        <button
+          v-if="githubState?.connected"
+          type="button"
+          class="open-location-signout"
+          :aria-label="t('cloudBrowser.disconnect')"
+          @click="emit('disconnectGitHub')"
         >
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
             <path

@@ -31,7 +31,12 @@ export function parseCloudSourceUri(
   }
 
   const provider = rest.slice(0, providerEnd)
-  if (provider !== 'onedrive' && provider !== 'googledrive' && provider !== 'webdav') {
+  if (
+    provider !== 'onedrive'
+    && provider !== 'googledrive'
+    && provider !== 'github'
+    && provider !== 'webdav'
+  ) {
     return null
   }
   return { provider, fileId: rest.slice(providerEnd + 1) }

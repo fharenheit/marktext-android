@@ -652,4 +652,11 @@ export const tr = {
   'cloudBrowser.loading': 'Yükleniyor…',
   'cloudBrowser.empty': 'Burada Markdown belgesi yok',
   'cloudBrowser.retry': 'Yeniden dene',
+  'cloudBrowser.github.signInHint': 'Depolarınızdaki Markdown belgelerini açmak için GitHub hesabınızla oturum açın. Belgeler şimdilik salt okunur açılır.',
+  'cloudBrowser.github.connect': 'GitHub\'da oturum aç',
+  'cloudBrowser.github.deviceHint': 'Oturum açmayı tamamlamak için bu kodu GitHub\'a girin:',
+  'cloudBrowser.github.openVerification': 'Kodu kopyala ve GitHub\'ı aç',
+  'cloudBrowser.github.waiting': 'GitHub\'da onay bekleniyor…',
+  'cloudBrowser.github.cancel': 'Oturum açmayı iptal et',
+  'openLocations.githubSubtitle': 'Depolar, dallar ve Markdown dosyaları',
 } satisfies Record<I18nKey, string>

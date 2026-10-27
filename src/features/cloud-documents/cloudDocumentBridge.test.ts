@@ -68,6 +68,25 @@ describe('cloudDocumentBridge', () => {
     expect(opened.providerName).toBe('Google Drive')
   })
 
+  it('keeps a provider path hint and the read-only flag of GitHub documents', () => {
+    const opened = toOpenedDocumentFromCloud('github', {
+      ...CLOUD_CONTENT,
+      fileId: 'octocat/hello/main/docs%2Fnotes.md',
+      providerName: 'GitHub',
+      canWrite: false,
+      pathHint: 'octocat/hello@main/docs/notes.md',
+    })
+
+    expect(opened.sourceUri).toBe('cloud:github:octocat/hello/main/docs%2Fnotes.md')
+    expect(opened.pathHint).toBe('octocat/hello@main/docs/notes.md')
+    expect(opened.displayName).toBe('notes.md')
+    expect(opened.canWrite).toBe(false)
+  })
+
+  it('falls back to the display name when no path hint is reported', () => {
+    expect(toOpenedDocumentFromCloud('onedrive', CLOUD_CONTENT).pathHint).toBe('notes.md')
+  })
+
   it('routes cloud source URIs to the cloud plugin on read', async () => {
     readCloudDocument.mockResolvedValue(CLOUD_CONTENT)
 

@@ -643,4 +643,11 @@ export const zhCN = {
   'cloudBrowser.loading': '正在加载…',
   'cloudBrowser.empty': '这里没有 Markdown 文档',
   'cloudBrowser.retry': '重试',
+  'cloudBrowser.github.signInHint': '使用 GitHub 账户登录，即可打开仓库中的 Markdown 文档。目前以只读方式打开。',
+  'cloudBrowser.github.connect': '登录 GitHub',
+  'cloudBrowser.github.deviceHint': '请在 GitHub 上输入此代码以完成登录：',
+  'cloudBrowser.github.openVerification': '复制代码并打开 GitHub',
+  'cloudBrowser.github.waiting': '正在等待 GitHub 上的授权…',
+  'cloudBrowser.github.cancel': '取消登录',
+  'openLocations.githubSubtitle': '仓库、分支和 Markdown 文件',
 } satisfies Record<I18nKey, string>

@@ -652,4 +652,11 @@ export const ja = {
   'cloudBrowser.loading': '読み込み中…',
   'cloudBrowser.empty': 'ここに Markdown ドキュメントはありません',
   'cloudBrowser.retry': '再試行',
+  'cloudBrowser.github.signInHint': 'GitHub アカウントでサインインすると、リポジトリの Markdown 文書を開けます。現在は読み取り専用で開きます。',
+  'cloudBrowser.github.connect': 'GitHub にサインイン',
+  'cloudBrowser.github.deviceHint': 'サインインを完了するには、GitHub でこのコードを入力してください:',
+  'cloudBrowser.github.openVerification': 'コードをコピーして GitHub を開く',
+  'cloudBrowser.github.waiting': 'GitHub での承認を待っています…',
+  'cloudBrowser.github.cancel': 'サインインをキャンセル',
+  'openLocations.githubSubtitle': 'リポジトリ、ブランチ、Markdown ファイル',
 } satisfies Record<I18nKey, string>

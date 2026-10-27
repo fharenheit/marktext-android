@@ -652,4 +652,11 @@ export const es = {
   'cloudBrowser.loading': 'Cargando…',
   'cloudBrowser.empty': 'No hay documentos Markdown aquí',
   'cloudBrowser.retry': 'Reintentar',
+  'cloudBrowser.github.signInHint': 'Inicia sesión con tu cuenta de GitHub para abrir documentos Markdown de tus repositorios. Por ahora se abren en solo lectura.',
+  'cloudBrowser.github.connect': 'Iniciar sesión en GitHub',
+  'cloudBrowser.github.deviceHint': 'Introduce este código en GitHub para completar el inicio de sesión:',
+  'cloudBrowser.github.openVerification': 'Copiar código y abrir GitHub',
+  'cloudBrowser.github.waiting': 'Esperando la aprobación en GitHub…',
+  'cloudBrowser.github.cancel': 'Cancelar inicio de sesión',
+  'openLocations.githubSubtitle': 'Repositorios, ramas y archivos Markdown',
 } satisfies Record<I18nKey, string>

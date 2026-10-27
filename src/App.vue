@@ -19,6 +19,7 @@ import {
 import {
   addCloudAuthListener,
   addCloudAuthPendingListener,
+  cancelCloudAuth,
   connectCloudAccount,
   disconnectCloudAccount,
   getCloudAccountState,
@@ -59,6 +60,7 @@ import {
   readAndroidClipboardText,
 } from './lib/androidSelection'
 import { openExternalUrl } from './lib/externalLinks'
+import { copyTextToClipboard } from './lib/clipboard'
 import { createDocumentOutline, waitForViewportSettle } from './features/editor/documentOutline'
 import { createDocumentSearch } from './features/editor/documentSearch'
 import {
@@ -1557,6 +1559,18 @@ const cloudBrowserError = ref<string | null>(null)
 const cloudBrowserEntries = ref<CloudFolderEntry[]>([])
 const cloudBrowserPath = ref<{ id: string; name: string }[]>([])
 const cloudOpeningFileId = ref<string | null>(null)
+// The in-app folder browser serves OneDrive and GitHub (repositories →
+// branches → folders); Google Drive picks through its own page.
+const cloudBrowserProvider = ref<'onedrive' | 'github'>('onedrive')
+const githubAccountState = ref<CloudAccountState | null>(null)
+// Set while the GitHub device flow waits for the user to enter the code on
+// github.com; the plugin polls and reports through cloudAuthCompleted.
+// Unlike the browser wait, app visibility says nothing about it.
+const githubDeviceCode = ref<{ userCode: string; verificationUri: string } | null>(null)
+const githubRequestingCode = ref(false)
+const cloudBrowserAccountState = computed(() =>
+  cloudBrowserProvider.value === 'github' ? githubAccountState.value : oneDriveAccountState.value,
+)
 
 async function refreshOneDriveAccountState() {
   if (!isCloudDocumentAccessAvailable()) {
@@ -1571,12 +1585,32 @@ async function refreshOneDriveAccountState() {
   }
 }
 
+async function refreshGitHubAccountState() {
+  if (!isCloudDocumentAccessAvailable()) {
+    githubAccountState.value = { connected: false, available: false, accountName: null }
+    return
+  }
+  try {
+    githubAccountState.value = await getCloudAccountState('github')
+  } catch (error) {
+    androidDocumentLog.warn('GitHub account state unavailable', { error })
+    githubAccountState.value = { connected: false, available: false, accountName: null }
+  }
+}
+
+function refreshCloudBrowserAccountState() {
+  return cloudBrowserProvider.value === 'github'
+    ? refreshGitHubAccountState()
+    : refreshOneDriveAccountState()
+}
+
 function showOpenLocations() {
   homeNotice.value = null
   openLocationsNotice.value = null
   currentScreen.value = 'open-locations'
   void refreshOneDriveAccountState()
   void refreshGoogleDriveAccountState()
+  void refreshGitHubAccountState()
 }
 
 async function openFileFromLocations() {
@@ -1598,8 +1632,9 @@ async function loadCloudFolder() {
   cloudBrowserLoading.value = true
   cloudBrowserError.value = null
   refocusOneDriveSaveDialog()
+  const provider = cloudBrowserProvider.value
   try {
-    const entries = await listCloudFolder('onedrive', folderId)
+    const entries = await listCloudFolder(provider, folderId)
     if (generation !== cloudBrowserRequestGeneration) {
       return
     }
@@ -1610,7 +1645,7 @@ async function loadCloudFolder() {
     }
     cloudBrowserEntries.value = []
     cloudBrowserError.value = getAndroidDocumentUserMessage(error)
-    androidDocumentLog.warn('OneDrive folder listing failed', { error })
+    androidDocumentLog.warn('cloud folder listing failed', { provider, error })
   } finally {
     if (generation === cloudBrowserRequestGeneration) {
       cloudBrowserLoading.value = false
@@ -1618,19 +1653,28 @@ async function loadCloudFolder() {
   }
 }
 
-async function showCloudBrowser() {
+async function showCloudBrowser(provider: 'onedrive' | 'github') {
+  cloudBrowserProvider.value = provider
   currentScreen.value = 'cloud-browser'
   cloudBrowserPath.value = []
   cloudBrowserEntries.value = []
   cloudBrowserError.value = null
   // Wait for the account state when it has not resolved yet, so a signed-in
   // user entering quickly is not stranded on an empty, never-loaded list.
-  if (oneDriveAccountState.value === null) {
-    await refreshOneDriveAccountState()
+  if (cloudBrowserAccountState.value === null) {
+    await refreshCloudBrowserAccountState()
   }
-  if (oneDriveAccountState.value?.connected) {
+  if (cloudBrowserAccountState.value?.connected) {
     void loadCloudFolder()
   }
+}
+
+/** Back from the browser root; a pending GitHub sign-in is abandoned with the page. */
+function leaveCloudBrowser() {
+  if (githubDeviceCode.value !== null) {
+    void cancelGitHubSignIn()
+  }
+  currentScreen.value = 'open-locations'
 }
 
 async function connectOneDrive() {
@@ -1650,6 +1694,66 @@ async function connectOneDrive() {
     cloudBrowserError.value = getAndroidDocumentUserMessage(error)
     androidDocumentLog.warn('OneDrive connect failed to start', { error })
   }
+}
+
+async function connectGitHub() {
+  if (githubRequestingCode.value || githubDeviceCode.value !== null) {
+    return
+  }
+  githubRequestingCode.value = true
+  cloudBrowserError.value = null
+  try {
+    const started = await connectCloudAccount('github')
+    if (started.userCode && started.verificationUri) {
+      githubDeviceCode.value = {
+        userCode: started.userCode,
+        verificationUri: started.verificationUri,
+      }
+    }
+  } catch (error) {
+    if (getAndroidDocumentErrorCode(error) !== 'CLOUD_AUTH_CANCELED') {
+      cloudBrowserError.value = getAndroidDocumentUserMessage(error)
+    }
+    androidDocumentLog.warn('GitHub connect failed to start', { error })
+  } finally {
+    githubRequestingCode.value = false
+  }
+}
+
+/** The user types the code on github.com; copying it first saves retyping. */
+async function openGitHubVerification() {
+  const code = githubDeviceCode.value
+  if (code === null) {
+    return
+  }
+  await copyTextToClipboard(code.userCode)
+  await openExternalUrl(code.verificationUri)
+}
+
+async function cancelGitHubSignIn() {
+  githubDeviceCode.value = null
+  try {
+    await cancelCloudAuth('github')
+  } catch (error) {
+    androidDocumentLog.warn('GitHub sign-in cancel failed', { error })
+  }
+}
+
+async function disconnectGitHub() {
+  githubDeviceCode.value = null
+  try {
+    await disconnectCloudAccount('github')
+  } catch (error) {
+    androidDocumentLog.warn('GitHub disconnect failed', { error })
+  }
+  cloudBrowserEntries.value = []
+  cloudBrowserPath.value = []
+  cloudBrowserError.value = null
+  await refreshGitHubAccountState()
+}
+
+function disconnectCloudBrowserAccount() {
+  return cloudBrowserProvider.value === 'github' ? disconnectGitHub() : disconnectOneDrive()
 }
 
 async function disconnectOneDrive() {
@@ -1676,12 +1780,13 @@ async function handleCloudEntryOpen(entry: CloudFolderEntry) {
   }
 
   cloudOpeningFileId.value = entry.id
+  const provider = cloudBrowserProvider.value
   try {
-    const content = await readCloudDocument('onedrive', entry.id, androidMarkdownSettings.value)
-    await openAndroidDocumentResult(toOpenedDocumentFromCloud('onedrive', content))
+    const content = await readCloudDocument(provider, entry.id, androidMarkdownSettings.value)
+    await openAndroidDocumentResult(toOpenedDocumentFromCloud(provider, content))
   } catch (error) {
     cloudBrowserError.value = getAndroidDocumentUserMessage(error)
-    androidDocumentLog.error('open OneDrive document failed', { fileId: entry.id, error })
+    androidDocumentLog.error('open cloud document failed', { provider, fileId: entry.id, error })
   } finally {
     cloudOpeningFileId.value = null
   }
@@ -1850,6 +1955,7 @@ function pickOneDriveSaveFolder(): Promise<string | null> {
       resolve(folderId)
     }
     cloudBrowserSaveModeActive.value = true
+    cloudBrowserProvider.value = 'onedrive'
     cloudBrowserPath.value = []
     cloudBrowserEntries.value = []
     cloudBrowserError.value = null
@@ -2020,6 +2126,24 @@ function installCloudAuthListener() {
     }
   })
   void addCloudAuthListener(event => {
+    if (event.provider === 'github') {
+      githubDeviceCode.value = null
+      if (event.connected) {
+        void refreshGitHubAccountState().then(() => {
+          if (currentScreen.value === 'cloud-browser' && cloudBrowserProvider.value === 'github') {
+            void loadCloudFolder()
+          }
+        })
+        return
+      }
+      if (event.errorCode !== 'CLOUD_AUTH_CANCELED') {
+        cloudBrowserError.value = event.message ?? 'GitHub sign-in failed'
+      }
+      androidDocumentLog.warn('GitHub sign-in did not complete', {
+        errorCode: event.errorCode,
+      })
+      return
+    }
     if (event.provider === 'googledrive') {
       // Save-as folder trips resolve their own promise; nothing here may
       // fall through to the document-open handling below.
@@ -2074,7 +2198,7 @@ function installCloudAuthListener() {
       // let a second sign-in start in the refresh window.
       void refreshOneDriveAccountState().then(() => {
         cloudConnecting.value = null
-        if (currentScreen.value === 'cloud-browser') {
+        if (currentScreen.value === 'cloud-browser' && cloudBrowserProvider.value === 'onedrive') {
           void loadCloudFolder()
         }
       })
@@ -2504,7 +2628,7 @@ async function handleAppBackButton() {
       await showHome()
       return
     case 'show-open-locations':
-      currentScreen.value = 'open-locations'
+      leaveCloudBrowser()
       return
     case 'cancel-save-destination':
       chooseSaveDestination(null)
@@ -2860,32 +2984,43 @@ onBeforeUnmount(() => {
     :one-drive-state="oneDriveAccountState"
     :google-drive-state="googleDriveAccountState"
     :google-drive-busy="googleDriveBusy"
+    :github-state="githubAccountState"
     :notice="openLocationsNotice"
     @back="currentScreen = 'home'"
     @open-this-phone="openFileFromLocations"
     @browse-all="openFileFromLocations"
-    @open-one-drive="showCloudBrowser"
+    @open-one-drive="showCloudBrowser('onedrive')"
     @open-google-drive="handleOpenGoogleDrive"
+    @open-git-hub="showCloudBrowser('github')"
     @disconnect-one-drive="disconnectOneDrive"
     @disconnect-google-drive="disconnectGoogleDrive"
+    @disconnect-git-hub="disconnectGitHub"
   />
 
   <CloudBrowserScreen
     v-else-if="currentScreen === 'cloud-browser' && !cloudBrowserSaveModeActive"
-    :account-state="oneDriveAccountState"
-    :connecting="cloudConnecting"
+    :provider="cloudBrowserProvider"
+    :account-state="cloudBrowserAccountState"
+    :connecting="
+      cloudBrowserProvider === 'github'
+        ? githubRequestingCode
+          ? 'browser'
+          : null
+        : cloudConnecting
+    "
+    :device-code="cloudBrowserProvider === 'github' ? githubDeviceCode : null"
     :loading="cloudBrowserLoading"
     :error-message="cloudBrowserError"
     :entries="cloudBrowserEntries"
     :folder-name="cloudBrowserPath.at(-1)?.name ?? null"
     :opening-file-id="cloudOpeningFileId"
-    @back="
-      cloudBrowserPath.length > 0 ? cloudBrowserNavigateUp() : (currentScreen = 'open-locations')
-    "
-    @connect="connectOneDrive"
-    @disconnect="disconnectOneDrive"
+    @back="cloudBrowserPath.length > 0 ? cloudBrowserNavigateUp() : leaveCloudBrowser()"
+    @connect="cloudBrowserProvider === 'github' ? connectGitHub() : connectOneDrive()"
+    @disconnect="disconnectCloudBrowserAccount"
     @open-entry="handleCloudEntryOpen"
     @retry="loadCloudFolder"
+    @open-verification="openGitHubVerification"
+    @cancel-connect="cancelGitHubSignIn"
   />
 
   <EditorScreen

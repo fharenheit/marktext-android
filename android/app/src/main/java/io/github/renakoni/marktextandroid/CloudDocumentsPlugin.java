@@ -18,16 +18,21 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
  * Cloud documents over provider web APIs — no provider app required
- * (#185 Phase 2: OneDrive, then Google Drive). OAuth runs in the system
- * browser (embedded WebViews are provider-blocked); the redirect lands back
- * here through a per-provider intent filter. All network work runs on a
- * single-thread executor; protocol logic lives in the pure-JVM
- * {@link OneDriveGraphClient} and {@link GoogleDriveClient}.
+ * (#185 Phase 2: OneDrive, then Google Drive, then GitHub). OAuth runs in
+ * the system browser (embedded WebViews are provider-blocked); the redirect
+ * lands back here through a per-provider intent filter. GitHub instead signs
+ * in with the device flow (a code the user enters on github.com, polled
+ * here), since its browser flow needs a client secret. All network work
+ * runs on a single-thread executor; protocol logic lives in the pure-JVM
+ * {@link OneDriveGraphClient}, {@link GoogleDriveClient} and
+ * {@link GitHubClient}.
  */
 @CapacitorPlugin(name = "CloudDocuments")
 public class CloudDocumentsPlugin extends Plugin {
@@ -35,12 +40,16 @@ public class CloudDocumentsPlugin extends Plugin {
     private static final String TAG = "MarkTextAndroid";
     private static final String PROVIDER_ONEDRIVE = "onedrive";
     private static final String PROVIDER_GOOGLEDRIVE = "googledrive";
+    private static final String PROVIDER_GITHUB = "github";
     private static final String PROVIDER_WEBDAV = "webdav";
     private static final String CLOUD_PREFS = "cloud_documents";
     private static final String PREF_ONEDRIVE_TOKENS = "onedrive_tokens";
     private static final String PREF_ONEDRIVE_PENDING_AUTH = "onedrive_pending_auth";
     private static final String PREF_GOOGLEDRIVE_TOKENS = "googledrive_tokens";
     private static final String PREF_GOOGLEDRIVE_PENDING_AUTH = "googledrive_pending_auth";
+    private static final String PREF_GITHUB_TOKENS = "github_tokens";
+    /** Unused: the device flow keeps no pending record across restarts. */
+    private static final String PREF_GITHUB_PENDING_AUTH = "github_pending_auth";
     private static final String EVENT_AUTH_COMPLETED = "cloudAuthCompleted";
     private static final String EVENT_AUTH_PENDING = "cloudAuthPending";
     private static final String OAUTH_HOST = "oauth";
@@ -52,6 +61,20 @@ public class CloudDocumentsPlugin extends Plugin {
     private final HttpTransport cloudTransport = new UrlConnectionTransport();
     private final OneDriveGraphClient graphClient = new OneDriveGraphClient(cloudTransport);
     private final GoogleDriveClient driveClient = new GoogleDriveClient(cloudTransport);
+    private final GitHubClient githubClient = new GitHubClient(cloudTransport);
+    /**
+     * Device-flow polls wait out GitHub's interval here, off the shared
+     * cloud executor, so a pending sign-in never blocks document I/O.
+     */
+    private final ScheduledExecutorService githubPollExecutor = Executors.newSingleThreadScheduledExecutor();
+    /** Guards {@link #githubDeviceGeneration} against the token save. */
+    private final Object githubDeviceLock = new Object();
+    /**
+     * Bumped by every device-flow start, cancel, disconnect and completion;
+     * a poll whose generation is stale stops silently, so a canceled or
+     * superseded sign-in can never save tokens.
+     */
+    private int githubDeviceGeneration = 0;
 
     /**
      * Per-provider wiring for the shared OAuth machinery: the pending/token
@@ -223,6 +246,59 @@ public class CloudDocumentsPlugin extends Plugin {
         }
     };
 
+    /**
+     * GitHub shares the token storage, account state, refresh gate and
+     * disconnect of the OAuth providers, but signs in through the device
+     * flow ({@link #startGitHubDeviceFlow}): the redirect members below are
+     * never reached.
+     */
+    private final ProviderAuth githubAuth = new ProviderAuth(
+        PROVIDER_GITHUB, "GitHub", PREF_GITHUB_PENDING_AUTH, PREF_GITHUB_TOKENS) {
+
+        @Override
+        String clientId() {
+            // Build-time resource (app/build.gradle): GitHub binds no
+            // signing certificate, so one id serves every variant.
+            return getContext().getString(R.string.github_client_id).trim();
+        }
+
+        @Override
+        String redirectUri() {
+            return "";
+        }
+
+        @Override
+        boolean matchesRedirect(Uri data) {
+            return false;
+        }
+
+        @Override
+        String authorizeUrl(String state, String codeChallenge, String pickMode) {
+            throw new UnsupportedOperationException("GitHub signs in with the device flow");
+        }
+
+        @Override
+        CloudTokenStore exchangeCode(String code, String verifier, long nowMillis)
+            throws CloudProviderException {
+            throw new CloudProviderException("CLOUD_AUTH_FAILED", "GitHub signs in with the device flow");
+        }
+
+        @Override
+        CloudTokenStore refresh(CloudTokenStore tokens, long nowMillis) throws CloudProviderException {
+            // Only expiring GitHub App tokens get here, and refreshing them
+            // needs the client secret the app cannot hold: sign in again.
+            throw new CloudProviderException(
+                "CLOUD_AUTH_EXPIRED",
+                "The GitHub sign-in has expired; connect the account again"
+            );
+        }
+
+        @Override
+        String fetchAccountName(String accessToken) throws IOException, CloudProviderException {
+            return githubClient.getLogin(accessToken);
+        }
+    };
+
     @Override
     public void load() {
         super.load();
@@ -287,6 +363,10 @@ public class CloudDocumentsPlugin extends Plugin {
             );
             return;
         }
+        if (auth == githubAuth) {
+            startGitHubDeviceFlow(call);
+            return;
+        }
         if (auth.exchangeInFlight) {
             call.reject(
                 "The " + auth.label + " sign-in is still completing",
@@ -344,6 +424,19 @@ public class CloudDocumentsPlugin extends Plugin {
         call.resolve(result);
     }
 
+    /**
+     * Abandons an in-progress device-flow sign-in (GitHub). Browser-based
+     * sign-ins have nothing to cancel here: backing out of the browser
+     * simply never redirects.
+     */
+    @PluginMethod
+    public void cancelCloudAuth(PluginCall call) {
+        if (PROVIDER_GITHUB.equals(call.getString("provider", ""))) {
+            cancelGitHubDeviceFlow();
+        }
+        call.resolve(new JSObject());
+    }
+
     @PluginMethod
     public void disconnectCloudAccount(PluginCall call) {
         String provider = call.getString("provider", "");
@@ -360,6 +453,10 @@ public class CloudDocumentsPlugin extends Plugin {
                 "CLOUD_AUTH_IN_PROGRESS"
             );
             return;
+        }
+        if (auth == githubAuth) {
+            // A sign-in still polling would otherwise reconnect right after.
+            cancelGitHubDeviceFlow();
         }
         CloudTokenStore tokens = readTokens(auth);
         cloudPrefs()
@@ -382,7 +479,7 @@ public class CloudDocumentsPlugin extends Plugin {
         if (auth == null) {
             return;
         }
-        if (auth != oneDriveAuth) {
+        if (auth == googleDriveAuth) {
             // Google Drive files are chosen through the Google Picker;
             // drive.file cannot enumerate a folder the app was never shown.
             call.reject(
@@ -394,13 +491,21 @@ public class CloudDocumentsPlugin extends Plugin {
 
         cloudExecutor.execute(() -> {
             try {
-                CloudTokenStore tokens = requireFreshTokens(oneDriveAuth);
-                List<OneDriveGraphClient.Entry> entries =
-                    graphClient.listFolder(tokens.accessToken, folderId);
-                entries.sort(
-                    Comparator.comparing((OneDriveGraphClient.Entry entry) -> !entry.isFolder)
-                        .thenComparing(entry -> entry.name, String.CASE_INSENSITIVE_ORDER)
-                );
+                CloudTokenStore tokens = requireFreshTokens(auth);
+                List<OneDriveGraphClient.Entry> entries;
+                if (auth == githubAuth) {
+                    GitHubClient.Location location = GitHubClient.Location.parse(folderId);
+                    entries = githubClient.list(tokens.accessToken, location);
+                    // Repositories keep GitHub's recently-pushed order and
+                    // branches lead with the default one; only folder
+                    // contents read better sorted.
+                    if (!location.isRoot() && !location.isRepository()) {
+                        sortFoldersFirst(entries);
+                    }
+                } else {
+                    entries = graphClient.listFolder(tokens.accessToken, folderId);
+                    sortFoldersFirst(entries);
+                }
 
                 JSArray values = new JSArray();
                 for (OneDriveGraphClient.Entry entry : entries) {
@@ -416,11 +521,11 @@ public class CloudDocumentsPlugin extends Plugin {
                 result.put("entries", values);
                 call.resolve(result);
             } catch (CloudProviderException ex) {
-                Log.w(TAG, "OneDrive folder listing failed: " + ex.getMessage());
+                Log.w(TAG, auth.label + " folder listing failed: " + ex.getMessage());
                 call.reject(ex.getMessage(), ex.code, ex);
             } catch (IOException ex) {
-                Log.w(TAG, "OneDrive folder listing failed", ex);
-                call.reject("Could not reach OneDrive", "CLOUD_NETWORK_FAILED", ex);
+                Log.w(TAG, auth.label + " folder listing failed", ex);
+                call.reject("Could not reach " + auth.label, "CLOUD_NETWORK_FAILED", ex);
             }
         });
     }
@@ -447,7 +552,22 @@ public class CloudDocumentsPlugin extends Plugin {
                 String versionTag;
                 boolean canWrite;
                 byte[] bytes;
-                if (auth == googleDriveAuth) {
+                String pathHint = null;
+                if (auth == githubAuth) {
+                    GitHubClient.Location location = GitHubClient.Location.parse(fileId);
+                    GitHubClient.FileContent file = githubClient.readFile(
+                        tokens.accessToken,
+                        location,
+                        MarkdownCodec.MAX_MARKDOWN_BYTES
+                    );
+                    name = file.name;
+                    versionTag = file.sha;
+                    // Read-only until commits land; edits stay recoverable
+                    // through the read-only document handling.
+                    canWrite = false;
+                    bytes = file.bytes;
+                    pathHint = location.describe();
+                } else if (auth == googleDriveAuth) {
                     GoogleDriveClient.FileContent file = driveClient.readFile(
                         tokens.accessToken,
                         fileId,
@@ -484,6 +604,7 @@ public class CloudDocumentsPlugin extends Plugin {
                 result.put("eTag", versionTag);
                 result.put("providerName", auth.label);
                 result.put("canWrite", canWrite);
+                result.put("pathHint", pathHint == null ? name : pathHint);
                 Log.i(TAG, "Read " + auth.label + " document: " + safeForLog(name));
                 call.resolve(result);
             } catch (CloudProviderException ex) {
@@ -509,7 +630,7 @@ public class CloudDocumentsPlugin extends Plugin {
         String encoding = MarkdownCodec.normalizeEncoding(call.getString("encoding", "utf8"));
         boolean writeBom = call.getBoolean("writeBom", false);
         ProviderAuth auth = requireDocumentProvider(call, provider);
-        if (auth == null) {
+        if (auth == null || rejectReadOnlyProvider(call, auth)) {
             return;
         }
         if (name.trim().length() == 0) {
@@ -578,7 +699,7 @@ public class CloudDocumentsPlugin extends Plugin {
         String encoding = MarkdownCodec.normalizeEncoding(call.getString("encoding", "utf8"));
         boolean writeBom = call.getBoolean("writeBom", false);
         ProviderAuth auth = requireDocumentProvider(call, provider);
-        if (auth == null) {
+        if (auth == null || rejectReadOnlyProvider(call, auth)) {
             return;
         }
         if (fileId.length() == 0) {
@@ -641,7 +762,150 @@ public class CloudDocumentsPlugin extends Plugin {
         if (PROVIDER_GOOGLEDRIVE.equals(provider)) {
             return googleDriveAuth;
         }
+        if (PROVIDER_GITHUB.equals(provider)) {
+            return githubAuth;
+        }
         return null;
+    }
+
+    /** GitHub documents open read-only until committing lands. */
+    private boolean rejectReadOnlyProvider(PluginCall call, ProviderAuth auth) {
+        if (auth != githubAuth) {
+            return false;
+        }
+        call.reject("Saving to GitHub is not available yet", "CLOUD_OPERATION_UNSUPPORTED");
+        return true;
+    }
+
+    /** Folders first, then case-insensitive names. */
+    private static void sortFoldersFirst(List<OneDriveGraphClient.Entry> entries) {
+        entries.sort(
+            Comparator.comparing((OneDriveGraphClient.Entry entry) -> !entry.isFolder)
+                .thenComparing(entry -> entry.name, String.CASE_INSENSITIVE_ORDER)
+        );
+    }
+
+    private void startGitHubDeviceFlow(PluginCall call) {
+        String clientId = githubAuth.clientId();
+        int generation;
+        synchronized (githubDeviceLock) {
+            // A second start supersedes the first: its polls go stale.
+            generation = ++githubDeviceGeneration;
+        }
+        cloudExecutor.execute(() -> {
+            try {
+                GitHubClient.DeviceCode code = githubClient.requestDeviceCode(clientId);
+                synchronized (githubDeviceLock) {
+                    if (generation != githubDeviceGeneration) {
+                        call.reject("The GitHub sign-in was canceled", "CLOUD_AUTH_CANCELED");
+                        return;
+                    }
+                }
+                long deadline = System.currentTimeMillis() + code.expiresInSeconds * 1000L;
+                scheduleGitHubPoll(generation, clientId, code.deviceCode, code.intervalSeconds, deadline);
+
+                Log.i(TAG, "Started GitHub device sign-in");
+                JSObject result = new JSObject();
+                result.put("started", true);
+                result.put("userCode", code.userCode);
+                result.put("verificationUri", code.verificationUri);
+                result.put("expiresIn", code.expiresInSeconds);
+                call.resolve(result);
+            } catch (CloudProviderException ex) {
+                Log.w(TAG, "GitHub sign-in could not start: " + ex.getMessage());
+                call.reject(ex.getMessage(), ex.code, ex);
+            } catch (IOException ex) {
+                Log.w(TAG, "GitHub sign-in could not start", ex);
+                call.reject("Could not reach GitHub", "CLOUD_NETWORK_FAILED", ex);
+            }
+        });
+    }
+
+    private void scheduleGitHubPoll(
+        int generation,
+        String clientId,
+        String deviceCode,
+        int intervalSeconds,
+        long deadlineMillis
+    ) {
+        githubPollExecutor.schedule(
+            () -> pollGitHubDeviceToken(generation, clientId, deviceCode, intervalSeconds, deadlineMillis),
+            intervalSeconds,
+            TimeUnit.SECONDS
+        );
+    }
+
+    private void pollGitHubDeviceToken(
+        int generation,
+        String clientId,
+        String deviceCode,
+        int intervalSeconds,
+        long deadlineMillis
+    ) {
+        if (!isGitHubDeviceFlowCurrent(generation)) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now >= deadlineMillis) {
+            finishGitHubDeviceFlow(generation, null, "CLOUD_AUTH_EXPIRED",
+                "The GitHub sign-in code expired; start the sign-in again");
+            return;
+        }
+        try {
+            GitHubClient.PollResult poll =
+                githubClient.pollDeviceToken(clientId, deviceCode, intervalSeconds, now);
+            if (poll.isPending()) {
+                scheduleGitHubPoll(generation, clientId, deviceCode, poll.nextIntervalSeconds, deadlineMillis);
+                return;
+            }
+            String login = null;
+            try {
+                login = githubClient.getLogin(poll.tokens.accessToken);
+            } catch (CloudProviderException | IOException ex) {
+                // The account label is cosmetic; the connection still works.
+                Log.w(TAG, "Could not read the GitHub account name", ex);
+            }
+            finishGitHubDeviceFlow(generation, poll.tokens.withAccountName(login), null, null);
+        } catch (CloudProviderException ex) {
+            Log.w(TAG, "GitHub sign-in did not complete: " + ex.getMessage());
+            finishGitHubDeviceFlow(generation, null, ex.code, ex.getMessage());
+        } catch (IOException ex) {
+            // A network blip while the user is still on github.com must not
+            // kill the sign-in; the deadline bounds the retries.
+            Log.w(TAG, "GitHub sign-in poll failed; retrying", ex);
+            scheduleGitHubPoll(generation, clientId, deviceCode, intervalSeconds, deadlineMillis);
+        }
+    }
+
+    /** Saves (on success) and reports the outcome, unless the flow went stale meanwhile. */
+    private void finishGitHubDeviceFlow(int generation, CloudTokenStore tokens, String errorCode, String message) {
+        synchronized (githubDeviceLock) {
+            if (generation != githubDeviceGeneration) {
+                return;
+            }
+            githubDeviceGeneration++;
+            if (tokens != null) {
+                saveTokens(githubAuth, tokens);
+            }
+        }
+        if (tokens != null) {
+            Log.i(TAG, "Connected the GitHub account");
+            emitAuthResult(githubAuth, true, tokens.accountName, null, null, null);
+        } else {
+            emitAuthResult(githubAuth, false, null, errorCode, message, null);
+        }
+    }
+
+    private boolean isGitHubDeviceFlowCurrent(int generation) {
+        synchronized (githubDeviceLock) {
+            return generation == githubDeviceGeneration;
+        }
+    }
+
+    private void cancelGitHubDeviceFlow() {
+        synchronized (githubDeviceLock) {
+            githubDeviceGeneration++;
+        }
     }
 
     private ProviderAuth requireDocumentProvider(PluginCall call, String provider) {

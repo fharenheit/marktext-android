@@ -45,4 +45,24 @@ public class CloudTokenStoreTest {
         assertFalse(tokens.isAccessTokenFresh(100_000L - CloudTokenStore.EXPIRY_MARGIN_MILLIS));
         assertFalse(new CloudTokenStore("", "RT", 100_000L, null).isAccessTokenFresh(0));
     }
+
+    @Test
+    public void neverExpiringTokensStandWithoutARefreshToken() {
+        CloudTokenStore tokens =
+            new CloudTokenStore("AT", "", CloudTokenStore.NEVER_EXPIRES, "octocat");
+
+        CloudTokenStore parsed = CloudTokenStore.parse(tokens.serialize());
+
+        assertEquals("AT", parsed.accessToken);
+        assertEquals("", parsed.refreshToken);
+        assertEquals(CloudTokenStore.NEVER_EXPIRES, parsed.expiresAtMillis);
+        assertTrue(parsed.isAccessTokenFresh(System.currentTimeMillis()));
+    }
+
+    @Test
+    public void expiringTokensStillRequireARefreshToken() {
+        assertNull(CloudTokenStore.parse(new CloudTokenStore("AT", "", 100_000L, null).serialize()));
+        assertNull(CloudTokenStore.parse(
+            new CloudTokenStore("", "", CloudTokenStore.NEVER_EXPIRES, null).serialize()));
+    }
 }

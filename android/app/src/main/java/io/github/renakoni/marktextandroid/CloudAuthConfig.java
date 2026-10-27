@@ -21,6 +21,16 @@ package io.github.renakoni.marktextandroid;
  * intent-filter lives in its own manifest overlay (src/debug,
  * src/release) for the same reason.
  *
+ * The GitHub client id is NOT here either: it is a build-time resource
+ * (`github_client_id`, from -PgithubClientId=... or the
+ * MARKTEXT_GITHUB_CLIENT_ID environment variable) so forks can sign in with
+ * their own registration. Register an OAuth app (github.com -> Settings ->
+ * Developer settings -> OAuth Apps; any homepage/callback URL) or a GitHub
+ * App with "Contents: read" repository permission, and tick "Enable Device
+ * Flow". No client secret is used. For a GitHub App, turn off "Expire user
+ * authorization tokens": refreshing them needs the secret, so expiring
+ * tokens would force a new sign-in every 8 hours.
+ *
  * While an id is empty, the provider reads unavailable and connecting
  * rejects with CLOUD_CLIENT_ID_MISSING.
  */

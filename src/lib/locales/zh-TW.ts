@@ -652,4 +652,11 @@ export const zhTW = {
   'cloudBrowser.loading': '正在載入…',
   'cloudBrowser.empty': '這裡沒有 Markdown 文件',
   'cloudBrowser.retry': '重試',
+  'cloudBrowser.github.signInHint': '使用 GitHub 帳戶登入，即可開啟儲存庫中的 Markdown 文件。目前以唯讀方式開啟。',
+  'cloudBrowser.github.connect': '登入 GitHub',
+  'cloudBrowser.github.deviceHint': '請在 GitHub 上輸入此代碼以完成登入：',
+  'cloudBrowser.github.openVerification': '複製代碼並開啟 GitHub',
+  'cloudBrowser.github.waiting': '正在等待 GitHub 上的授權…',
+  'cloudBrowser.github.cancel': '取消登入',
+  'openLocations.githubSubtitle': '儲存庫、分支與 Markdown 檔案',
 } satisfies Record<I18nKey, string>

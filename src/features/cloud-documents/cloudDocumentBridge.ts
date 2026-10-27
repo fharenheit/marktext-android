@@ -17,7 +17,7 @@ import {
 import { buildCloudSourceUri, parseCloudSourceUri } from '../../lib/cloudDocumentUris'
 
 /**
- * Last-seen version tag (OneDrive ETag / Drive headRevisionId) per cloud
+ * Last-seen version tag (OneDrive ETag / Drive headRevisionId / GitHub blob sha) per cloud
  * source URI, for conflict-checked writes. Process-lifetime is enough: a
  * document is always read before it can be saved, and a fresh read
  * refreshes the entry.
@@ -27,6 +27,7 @@ const cloudDocumentETags = new Map<string, string>()
 const CLOUD_PROVIDER_LABELS: Record<CloudProviderId, string> = {
   onedrive: 'OneDrive',
   googledrive: 'Google Drive',
+  github: 'GitHub',
   webdav: 'WebDAV',
 }
 
@@ -41,7 +42,7 @@ export function toOpenedDocumentFromCloud(
     sourceUri,
     displayName: content.displayName,
     providerName: content.providerName,
-    pathHint: content.displayName,
+    pathHint: content.pathHint ?? content.displayName,
     mimeType: 'text/markdown',
     markdown: content.markdown,
     encoding: content.encoding,

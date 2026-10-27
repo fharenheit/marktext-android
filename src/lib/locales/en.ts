@@ -646,6 +646,13 @@ export const en = {
   'cloudBrowser.loading': 'Loading…',
   'cloudBrowser.empty': 'No Markdown documents here',
   'cloudBrowser.retry': 'Try again',
+  'cloudBrowser.github.signInHint': 'Sign in with your GitHub account to open Markdown documents from your repositories. Documents open read-only for now.',
+  'cloudBrowser.github.connect': 'Sign in to GitHub',
+  'cloudBrowser.github.deviceHint': 'Enter this code on GitHub to finish signing in:',
+  'cloudBrowser.github.openVerification': 'Copy code and open GitHub',
+  'cloudBrowser.github.waiting': 'Waiting for approval on GitHub…',
+  'cloudBrowser.github.cancel': 'Cancel sign-in',
+  'openLocations.githubSubtitle': 'Repositories, branches and Markdown files',
 }
 
 export type I18nKey = keyof typeof en

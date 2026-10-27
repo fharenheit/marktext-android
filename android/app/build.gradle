@@ -14,6 +14,14 @@ def missingReleaseSigningVariables = releaseSigningValues.findAll { key, value -
 }.keySet()
 def releaseSigningConfigured = missingReleaseSigningVariables.isEmpty()
 
+// GitHub sign-in client id (an OAuth app or GitHub App with the device flow
+// enabled; no secret is involved). Supplied at build time so forks can use
+// their own registration: -PgithubClientId=... or MARKTEXT_GITHUB_CLIENT_ID.
+// Empty reads as provider-unavailable in the app.
+def githubClientId = (project.findProperty('githubClientId') ?: System.getenv('MARKTEXT_GITHUB_CLIENT_ID') ?: '')
+    .toString()
+    .trim()
+
 android {
     namespace = "io.github.renakoni.marktextandroid"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -24,6 +32,7 @@ android {
         versionCode 3
         versionName "0.2.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        resValue "string", "github_client_id", githubClientId
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61

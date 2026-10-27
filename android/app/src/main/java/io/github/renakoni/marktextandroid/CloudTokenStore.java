@@ -12,6 +12,11 @@ final class CloudTokenStore {
 
     /** Refresh this long before the reported expiry to absorb clock skew. */
     static final long EXPIRY_MARGIN_MILLIS = 60_000;
+    /**
+     * Expiry of tokens that never expire (GitHub OAuth tokens): they carry
+     * no refresh token and always read fresh.
+     */
+    static final long NEVER_EXPIRES = Long.MAX_VALUE;
 
     final String accessToken;
     final String refreshToken;
@@ -56,13 +61,18 @@ final class CloudTokenStore {
             JSONObject json = new JSONObject(serialized);
             String accessToken = json.optString("accessToken", "");
             String refreshToken = json.optString("refreshToken", "");
-            if (refreshToken.length() == 0) {
+            long expiresAtMillis = json.optLong("expiresAtMillis", 0);
+            // Expiring tokens are useless without a refresh token; only
+            // never-expiring ones may stand alone.
+            boolean usable = refreshToken.length() > 0
+                || (expiresAtMillis == NEVER_EXPIRES && accessToken.length() > 0);
+            if (!usable) {
                 return null;
             }
             return new CloudTokenStore(
                 accessToken,
                 refreshToken,
-                json.optLong("expiresAtMillis", 0),
+                expiresAtMillis,
                 json.isNull("accountName") ? null : json.optString("accountName", null)
             );
         } catch (JSONException ex) {

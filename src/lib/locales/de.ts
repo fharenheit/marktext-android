@@ -653,4 +653,11 @@ export const de = {
   'cloudBrowser.loading': 'Wird geladen …',
   'cloudBrowser.empty': 'Keine Markdown-Dokumente hier',
   'cloudBrowser.retry': 'Erneut versuchen',
+  'cloudBrowser.github.signInHint': 'Melde dich mit deinem GitHub-Konto an, um Markdown-Dokumente aus deinen Repositorys zu öffnen. Dokumente werden vorerst schreibgeschützt geöffnet.',
+  'cloudBrowser.github.connect': 'Bei GitHub anmelden',
+  'cloudBrowser.github.deviceHint': 'Gib diesen Code auf GitHub ein, um die Anmeldung abzuschließen:',
+  'cloudBrowser.github.openVerification': 'Code kopieren und GitHub öffnen',
+  'cloudBrowser.github.waiting': 'Warte auf die Bestätigung auf GitHub…',
+  'cloudBrowser.github.cancel': 'Anmeldung abbrechen',
+  'openLocations.githubSubtitle': 'Repositorys, Branches und Markdown-Dateien',
 } satisfies Record<I18nKey, string>

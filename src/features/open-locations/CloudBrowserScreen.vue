@@ -2,18 +2,25 @@
 import { useI18n } from '../../lib/i18n'
 import type { CloudAccountState, CloudFolderEntry } from '../../lib/cloudDocuments'
 
-defineProps<{
-  accountState: CloudAccountState | null
-  /** 'browser' = waiting for the sign-in browser; 'completing' = redirect landed, exchanging tokens. */
-  connecting: 'browser' | 'completing' | null
-  loading: boolean
-  errorMessage: string | null
-  entries: CloudFolderEntry[]
-  folderName: string | null
-  openingFileId: string | null
-  /** Save-as destination mode: folders navigate, files are inert, a save bar appears. */
-  saveMode?: boolean
-}>()
+withDefaults(
+  defineProps<{
+    /** Which in-app browsable provider this screen shows. */
+    provider?: 'onedrive' | 'github'
+    accountState: CloudAccountState | null
+    /** 'browser' = waiting for the sign-in browser; 'completing' = redirect landed, exchanging tokens. */
+    connecting: 'browser' | 'completing' | null
+    loading: boolean
+    errorMessage: string | null
+    entries: CloudFolderEntry[]
+    folderName: string | null
+    openingFileId: string | null
+    /** Save-as destination mode: folders navigate, files are inert, a save bar appears. */
+    saveMode?: boolean
+    /** GitHub device-flow code the user enters on github.com while the app polls. */
+    deviceCode?: { userCode: string; verificationUri: string } | null
+  }>(),
+  { provider: 'onedrive', saveMode: false, deviceCode: null },
+)
 
 const emit = defineEmits<{
   back: []
@@ -22,6 +29,8 @@ const emit = defineEmits<{
   openEntry: [entry: CloudFolderEntry]
   retry: []
   saveHere: []
+  openVerification: []
+  cancelConnect: []
 }>()
 
 const { t } = useI18n()
@@ -47,7 +56,9 @@ const { t } = useI18n()
           />
         </svg>
       </button>
-      <h1 id="cloud-browser-title" class="cloud-browser-title">{{ folderName ?? 'OneDrive' }}</h1>
+      <h1 id="cloud-browser-title" class="cloud-browser-title">
+        {{ folderName ?? (provider === 'github' ? 'GitHub' : 'OneDrive') }}
+      </h1>
       <button
         v-if="accountState?.connected && !saveMode"
         type="button"
@@ -63,7 +74,37 @@ const { t } = useI18n()
     </p>
 
     <div class="cloud-browser-content">
-      <template v-if="accountState && !accountState.connected">
+      <template v-if="accountState && !accountState.connected && deviceCode">
+        <p class="cloud-browser-hint">{{ t('cloudBrowser.github.deviceHint') }}</p>
+        <p class="cloud-browser-device-code" aria-live="polite">{{ deviceCode.userCode }}</p>
+        <button type="button" class="cloud-browser-primary" @click="emit('openVerification')">
+          {{ t('cloudBrowser.github.openVerification') }}
+        </button>
+        <p class="cloud-browser-hint">{{ t('cloudBrowser.github.waiting') }}</p>
+        <button type="button" class="cloud-browser-secondary" @click="emit('cancelConnect')">
+          {{ t('cloudBrowser.github.cancel') }}
+        </button>
+      </template>
+
+      <template v-else-if="accountState && !accountState.connected && provider === 'github'">
+        <p class="cloud-browser-hint">{{ t('cloudBrowser.github.signInHint') }}</p>
+        <button
+          type="button"
+          class="cloud-browser-primary"
+          :disabled="connecting !== null || !accountState.available"
+          @click="emit('connect')"
+        >
+          {{ connecting !== null ? t('cloudBrowser.loading') : t('cloudBrowser.github.connect') }}
+        </button>
+        <p v-if="!accountState.available" class="cloud-browser-hint">
+          {{ t('openLocations.cloudUnavailable') }}
+        </p>
+        <p v-else-if="errorMessage !== null" class="cloud-browser-hint" role="alert">
+          {{ errorMessage }}
+        </p>
+      </template>
+
+      <template v-else-if="accountState && !accountState.connected">
         <p class="cloud-browser-hint">{{ t('cloudBrowser.signInHint') }}</p>
         <button
           type="button"
@@ -234,6 +275,30 @@ const { t } = useI18n()
 
 .cloud-browser-primary:disabled {
   opacity: 0.6;
+}
+
+.cloud-browser-secondary {
+  display: block;
+  margin: 8px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.cloud-browser-secondary:active {
+  background: var(--press);
+}
+
+.cloud-browser-device-code {
+  margin: 8px;
+  font-family: 'DejaVu Sans Mono', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  user-select: all;
 }
 
 .cloud-browser-list {

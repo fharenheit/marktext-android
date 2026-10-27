@@ -652,4 +652,11 @@ export const ko = {
   'cloudBrowser.loading': '불러오는 중…',
   'cloudBrowser.empty': '여기에는 Markdown 문서가 없습니다',
   'cloudBrowser.retry': '다시 시도',
+  'cloudBrowser.github.signInHint': 'GitHub 계정으로 로그인하면 저장소의 Markdown 문서를 열 수 있습니다. 지금은 읽기 전용으로 열립니다.',
+  'cloudBrowser.github.connect': 'GitHub에 로그인',
+  'cloudBrowser.github.deviceHint': '로그인을 마치려면 GitHub에서 이 코드를 입력하세요:',
+  'cloudBrowser.github.openVerification': '코드 복사 후 GitHub 열기',
+  'cloudBrowser.github.waiting': 'GitHub에서 승인을 기다리는 중…',
+  'cloudBrowser.github.cancel': '로그인 취소',
+  'openLocations.githubSubtitle': '저장소, 브랜치, Markdown 파일',
 } satisfies Record<I18nKey, string>
