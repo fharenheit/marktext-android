@@ -46,13 +46,24 @@ import DocumentChangesView from './features/local-repos/DocumentChangesView.vue'
 import ConfirmSheet from './features/local-repos/ConfirmSheet.vue'
 import MergeConflictSheet from './features/local-repos/MergeConflictSheet.vue'
 import {
+  getRepositoryDisplayName,
   getRepositoryDocumentChanges,
   pullRepositoryDocumentForMerge,
   resolveRepositoryImageSource,
   revertRepositoryDocument,
 } from './features/local-repos/repositoryDocumentBridge'
-import { getRepositoryUserMessage } from './lib/localRepositories'
+import { callRepository, getRepositoryUserMessage } from './lib/localRepositories'
 import { threeWayMerge, type MergeConflictStrategy } from './lib/threeWayMerge'
+import {
+  fileSwitcherLocationFor,
+  githubIdPath,
+  githubPathId,
+  isOpenableFileName,
+  parentFolder,
+  sortFileSwitcherEntries,
+  type FileSwitcherEntry,
+  type FileSwitcherLocation,
+} from './features/editor/fileSwitcher'
 import { resolveGitHubImageSource } from './features/cloud-documents/githubImages'
 import type { GitHubDocumentLink } from './features/cloud-documents/githubLinks'
 import {
@@ -1733,6 +1744,144 @@ function repositoryBack() {
   }
 }
 
+// --- File panel: jump to another file of the same repository (working copy
+// or GitHub branch) from the editor, without going back to the file list.
+
+const fileSwitcherState = ref<{
+  location: FileSwitcherLocation
+  entries: FileSwitcherEntry[] | null
+  error: string | null
+} | null>(null)
+let fileSwitcherGeneration = 0
+
+const fileSwitcherView = computed(() => {
+  const state = fileSwitcherState.value
+  if (!state) {
+    return null
+  }
+  const { location } = state
+  const rootLabel = location.kind === 'repository'
+    ? getRepositoryDisplayName(location.repositoryId)
+    : (() => {
+        const [owner, repo, ref] = location.branchId.split('/')
+        return `${owner}/${repo}@${decodeURIComponent(ref)}`
+      })()
+  return {
+    folder: location.folder,
+    rootLabel,
+    currentPath: location.currentPath,
+    entries: state.entries,
+    error: state.error,
+  }
+})
+
+function canBrowseDocumentFiles() {
+  return fileSwitcherLocationFor(documentState.value.sourceUri) !== null
+}
+
+async function loadFileSwitcherFolder() {
+  const state = fileSwitcherState.value
+  if (!state) {
+    return
+  }
+  const generation = ++fileSwitcherGeneration
+  const { location } = state
+  state.entries = null
+  state.error = null
+  try {
+    let entries: FileSwitcherEntry[]
+    if (location.kind === 'repository') {
+      const listed = await callRepository(plugin =>
+        plugin.listRepositoryFolder({ id: location.repositoryId, path: location.folder }),
+      )
+      entries = listed.entries.map(entry => ({
+        name: entry.name,
+        path: entry.path,
+        isFolder: entry.isFolder,
+        openable: !entry.isFolder && isOpenableFileName(entry.name),
+      }))
+    } else {
+      const listed = await listCloudFolder('github', githubPathId(location.branchId, location.folder))
+      entries = listed.map(entry => ({
+        name: entry.name,
+        path: githubIdPath(entry.id),
+        isFolder: entry.isFolder,
+        openable: !entry.isFolder,
+      }))
+    }
+    if (generation === fileSwitcherGeneration && fileSwitcherState.value === state) {
+      state.entries = sortFileSwitcherEntries(entries)
+    }
+  } catch (error) {
+    if (generation === fileSwitcherGeneration && fileSwitcherState.value === state) {
+      state.error = location.kind === 'repository'
+        ? getRepositoryUserMessage(error)
+        : getAndroidDocumentUserMessage(error)
+    }
+  }
+}
+
+async function openFileSwitcher() {
+  closeEditorMenu()
+  const location = fileSwitcherLocationFor(documentState.value.sourceUri)
+  if (!location) {
+    return
+  }
+  fileSwitcherState.value = { location, entries: null, error: null }
+  await loadFileSwitcherFolder()
+}
+
+function closeFileSwitcher() {
+  fileSwitcherGeneration += 1
+  fileSwitcherState.value = null
+}
+
+async function fileSwitcherUp() {
+  const state = fileSwitcherState.value
+  if (state && state.location.folder) {
+    state.location = { ...state.location, folder: parentFolder(state.location.folder) }
+    await loadFileSwitcherFolder()
+  }
+}
+
+async function openFileFromSwitcher(entry: FileSwitcherEntry) {
+  const state = fileSwitcherState.value
+  if (!state) {
+    return
+  }
+  if (entry.isFolder) {
+    state.location = { ...state.location, folder: entry.path }
+    await loadFileSwitcherFolder()
+    return
+  }
+  if (!entry.openable) {
+    return
+  }
+  const { location } = state
+  closeFileSwitcher()
+  if (entry.path === location.currentPath) {
+    return
+  }
+  try {
+    // The current document's edits are flushed (working tree, or the
+    // recovery draft of a commit-only GitHub document) before switching.
+    await saveAndroidDocument({ waitForPendingSave: true })
+    const document = location.kind === 'repository'
+      ? await readRoutedMarkdownDocument(
+          buildRepositorySourceUri(location.repositoryId, entry.path),
+          androidMarkdownSettings.value,
+        )
+      : toOpenedDocumentFromCloud(
+          'github',
+          await readCloudDocument('github', githubPathId(location.branchId, entry.path), androidMarkdownSettings.value),
+        )
+    await openAndroidDocumentResult(document)
+  } catch (error) {
+    status.value = getAndroidDocumentUserMessage(error)
+    androidDocumentLog.warn('file panel open failed', { path: entry.path, error })
+  }
+}
+
 // --- Show changes / revert changes for repository and cloud documents ---
 
 const documentChanges = ref<{
@@ -3150,7 +3299,14 @@ async function handleAppBackButton() {
     searchOpen: editorSearchOpen.value,
     toolbarOpen: editorToolbarExpanded.value,
     sourceModeOpen: sourceModeActive.value,
+    filePanelOpen: fileSwitcherState.value !== null,
   })
+
+  // The editor's file panel sits above everything else on the editor screen.
+  if (currentScreen.value === 'editor' && fileSwitcherState.value) {
+    closeFileSwitcher()
+    return
+  }
 
   const action = getAppBackButtonAction({
     currentScreen: currentScreen.value,
@@ -3683,6 +3839,8 @@ onBeforeUnmount(() => {
     :can-show-changes="canShowDocumentChanges()"
     :can-revert-changes="canRevertDocumentChanges()"
     :can-pull-latest="canPullLatestDocument()"
+    :can-browse-files="canBrowseDocumentFiles()"
+    :file-switcher="fileSwitcherView"
     :committing="committingDocument"
     :link-sheet-open="linkSheetOpen"
     :table-sheet-open="tableSheetOpen"
@@ -3755,6 +3913,10 @@ onBeforeUnmount(() => {
     @show-changes="showDocumentChanges"
     @revert-changes="requestRevertDocumentChanges"
     @pull-latest="pullAndMergeLatest"
+    @open-files="openFileSwitcher"
+    @close-files="closeFileSwitcher"
+    @files-up="fileSwitcherUp"
+    @files-open="openFileFromSwitcher"
     @run-toolbar-command="runEditorToolbarCommand"
     @run-table-command="runEditorTableCommand"
     @run-selection-command="runEditorSelectionCommand"

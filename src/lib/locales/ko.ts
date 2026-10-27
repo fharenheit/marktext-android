@@ -721,6 +721,8 @@ export const ko = {
   'editor.actions.showChanges': '변경 내용 보기',
   'editor.actions.revertChanges': '변경 되돌리기',
   'editor.actions.pullLatest': '최신 버전 가져와 병합',
+  'editor.files.title': '파일',
+  'editor.files.up': '상위 폴더',
   'pullMerge.pulling': '최신 버전을 가져오는 중…',
   'pullMerge.upToDate': '이미 최신 버전입니다.',
   'pullMerge.merged': '최신 버전을 병합했습니다.',

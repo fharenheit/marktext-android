@@ -374,3 +374,35 @@ test('conflict markers land in the source pane of the split view', async ({ page
   await expect.poll(async () => ((await mockState(page)).files as Record<string, string>)['README.md'])
     .toContain('=======\nlaptop line\n>>>>>>> latest version')
 })
+
+test('the editor file panel jumps to another file without leaving the editor', async ({ page }) => {
+  await openRepository(page)
+  await editDocument(page, 'README.md', 'edited before switching')
+
+  await page.getByTestId('file-switcher-open-button').click()
+  const panel = page.getByTestId('file-switcher')
+  await expect(panel).toBeVisible()
+  await expect(page.getByTestId('file-switcher-entry-README.md')).toHaveAttribute('aria-current', 'page')
+  await page.waitForTimeout(400)
+  await snapshot(page, 'repo-14-file-panel')
+
+  // Into a folder and open a file there: the editor switches directly.
+  await page.getByTestId('file-switcher-entry-docs').click()
+  await expect(page.getByTestId('file-switcher-folder')).toContainText('docs')
+  await page.getByTestId('file-switcher-entry-docs/guide.md').click()
+  await expect(panel).toBeHidden()
+  await expectEditorReady(page)
+  await expect(page.getByTestId('editor-host')).toContainText('step one')
+
+  // The previous file's edit was saved before switching.
+  expect(((await mockState(page)).files as Record<string, string>)['README.md']).toContain('edited before switching')
+
+  // Back in the panel: it starts in this file's folder; Up and Back work.
+  await page.getByTestId('file-switcher-open-button').click()
+  await expect(page.getByTestId('file-switcher-entry-docs/guide.md')).toHaveAttribute('aria-current', 'page')
+  await page.getByTestId('file-switcher-up').click()
+  await expect(page.getByTestId('file-switcher-entry-README.md')).toBeVisible()
+  await page.evaluate(() => (window as unknown as { __emitCapacitorAppBackButton: () => void }).__emitCapacitorAppBackButton())
+  await expect(panel).toBeHidden()
+  await expect(page.getByTestId('editor-host')).toContainText('step one')
+})

@@ -721,6 +721,8 @@ export const fr = {
   'editor.actions.showChanges': 'Voir les modifications',
   'editor.actions.revertChanges': 'Annuler les modifications',
   'editor.actions.pullLatest': 'Récupérer et fusionner la dernière version',
+  'editor.files.title': 'Fichiers',
+  'editor.files.up': 'Dossier parent',
   'pullMerge.pulling': 'Récupération de la dernière version…',
   'pullMerge.upToDate': 'Déjà à jour.',
   'pullMerge.merged': 'Dernière version fusionnée.',

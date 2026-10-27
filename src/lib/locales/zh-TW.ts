@@ -721,6 +721,8 @@ export const zhTW = {
   'editor.actions.showChanges': '查看變更',
   'editor.actions.revertChanges': '還原變更',
   'editor.actions.pullLatest': '拉取並合併最新版本',
+  'editor.files.title': '檔案',
+  'editor.files.up': '上一層資料夾',
   'pullMerge.pulling': '正在取得最新版本…',
   'pullMerge.upToDate': '已是最新版本。',
   'pullMerge.merged': '已合併最新版本。',

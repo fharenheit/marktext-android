@@ -715,6 +715,8 @@ export const en = {
   'editor.actions.showChanges': 'Show changes',
   'editor.actions.revertChanges': 'Revert changes',
   'editor.actions.pullLatest': 'Pull & merge latest',
+  'editor.files.title': 'Files',
+  'editor.files.up': 'Up one folder',
   'pullMerge.pulling': 'Updating to the latest version…',
   'pullMerge.upToDate': 'Already up to date.',
   'pullMerge.merged': 'Merged the latest version.',

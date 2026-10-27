@@ -721,6 +721,8 @@ export const ja = {
   'editor.actions.showChanges': '変更を表示',
   'editor.actions.revertChanges': '変更を元に戻す',
   'editor.actions.pullLatest': '最新版を取得してマージ',
+  'editor.files.title': 'ファイル',
+  'editor.files.up': '一つ上のフォルダー',
   'pullMerge.pulling': '最新版を取得しています…',
   'pullMerge.upToDate': 'すでに最新です。',
   'pullMerge.merged': '最新版をマージしました。',

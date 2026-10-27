@@ -721,6 +721,8 @@ export const pt = {
   'editor.actions.showChanges': 'Ver alterações',
   'editor.actions.revertChanges': 'Reverter alterações',
   'editor.actions.pullLatest': 'Puxar e mesclar a mais recente',
+  'editor.files.title': 'Arquivos',
+  'editor.files.up': 'Subir uma pasta',
   'pullMerge.pulling': 'Obtendo a versão mais recente…',
   'pullMerge.upToDate': 'Já está atualizado.',
   'pullMerge.merged': 'A versão mais recente foi mesclada.',

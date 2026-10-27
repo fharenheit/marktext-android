@@ -721,6 +721,8 @@ export const tr = {
   'editor.actions.showChanges': 'Değişiklikleri göster',
   'editor.actions.revertChanges': 'Değişiklikleri geri al',
   'editor.actions.pullLatest': 'En son sürümü çek ve birleştir',
+  'editor.files.title': 'Dosyalar',
+  'editor.files.up': 'Bir üst klasör',
   'pullMerge.pulling': 'En son sürüm alınıyor…',
   'pullMerge.upToDate': 'Zaten güncel.',
   'pullMerge.merged': 'En son sürüm birleştirildi.',

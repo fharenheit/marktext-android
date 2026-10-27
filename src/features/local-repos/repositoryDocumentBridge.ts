@@ -19,6 +19,11 @@ import {
 const workTreeUris = new Map<string, string>()
 const repositoryNames = new Map<string, string>()
 
+/** The repository's display name, as remembered when its work tree was. */
+export function getRepositoryDisplayName(repositoryId: string) {
+  return repositoryNames.get(repositoryId) ?? repositoryId
+}
+
 export function rememberRepositoryWorkTree(repositoryId: string, workTreeUri: string, name?: string) {
   workTreeUris.set(repositoryId, workTreeUri.replace(/\/+$/, ''))
   if (name) {

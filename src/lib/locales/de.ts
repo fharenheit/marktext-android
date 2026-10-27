@@ -722,6 +722,8 @@ export const de = {
   'editor.actions.showChanges': 'Änderungen anzeigen',
   'editor.actions.revertChanges': 'Änderungen zurücksetzen',
   'editor.actions.pullLatest': 'Neueste Version holen und zusammenführen',
+  'editor.files.title': 'Dateien',
+  'editor.files.up': 'Einen Ordner nach oben',
   'pullMerge.pulling': 'Neueste Version wird geholt …',
   'pullMerge.upToDate': 'Bereits aktuell.',
   'pullMerge.merged': 'Neueste Version zusammengeführt.',

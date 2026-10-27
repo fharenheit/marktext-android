@@ -712,6 +712,8 @@ export const zhCN = {
   'editor.actions.showChanges': '查看更改',
   'editor.actions.revertChanges': '还原更改',
   'editor.actions.pullLatest': '拉取并合并最新版本',
+  'editor.files.title': '文件',
+  'editor.files.up': '上一级文件夹',
   'pullMerge.pulling': '正在获取最新版本…',
   'pullMerge.upToDate': '已是最新版本。',
   'pullMerge.merged': '已合并最新版本。',

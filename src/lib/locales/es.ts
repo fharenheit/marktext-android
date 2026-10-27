@@ -721,6 +721,8 @@ export const es = {
   'editor.actions.showChanges': 'Ver cambios',
   'editor.actions.revertChanges': 'Revertir cambios',
   'editor.actions.pullLatest': 'Traer y fusionar lo último',
+  'editor.files.title': 'Archivos',
+  'editor.files.up': 'Subir una carpeta',
   'pullMerge.pulling': 'Obteniendo la última versión…',
   'pullMerge.upToDate': 'Ya está al día.',
   'pullMerge.merged': 'Se fusionó la última versión.',

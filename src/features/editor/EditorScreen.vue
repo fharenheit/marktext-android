@@ -14,6 +14,8 @@ import MobileSelectionToolbar from './components/MobileSelectionToolbar.vue'
 import LinkActionOverlay from './components/LinkActionOverlay.vue'
 import ResumeCard from './components/ResumeCard.vue'
 import EditorFailurePanel from './components/EditorFailurePanel.vue'
+import FileSwitcherSheet from './components/FileSwitcherSheet.vue'
+import type { FileSwitcherEntry } from './fileSwitcher'
 import type { SelectionToolbarCommandId } from './selectionToolbar'
 import type { TableCommandId } from './tableCommands'
 import type { SelectionToolbarRows } from './selectionToolbarSettings'
@@ -96,6 +98,15 @@ const props = defineProps<{
   sourceFocusOnEnter: boolean
   /** Source and WYSIWYG side by side, both editable; implies source mode. */
   splitViewActive?: boolean
+  /** The document lives in a repository folder the file panel can browse. */
+  canBrowseFiles?: boolean
+  fileSwitcher?: {
+    folder: string
+    rootLabel: string
+    currentPath: string
+    entries: FileSwitcherEntry[] | null
+    error: string | null
+  } | null
 }>()
 
 const emit = defineEmits<{
@@ -126,6 +137,10 @@ const emit = defineEmits<{
   'show-changes': []
   'revert-changes': []
   'pull-latest': []
+  'open-files': []
+  'close-files': []
+  'files-up': []
+  'files-open': [entry: FileSwitcherEntry]
   'run-toolbar-command': [commandId: MobileCommandId, restoreRange: Range | null]
   'run-table-command': [commandId: TableCommandId]
   'run-selection-command': [commandId: SelectionToolbarCommandId, restoreRange: Range | null]
@@ -620,6 +635,20 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="editorReady" class="editor-actions">
         <button
+          v-if="canBrowseFiles"
+          class="icon-button"
+          type="button"
+          :aria-label="t('editor.files.title')"
+          :title="t('editor.files.title')"
+          :aria-expanded="Boolean(fileSwitcher)"
+          data-testid="file-switcher-open-button"
+          @click="emit('open-files')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M3.5 6.5a1.5 1.5 0 0 1 1.5-1.5h4.2l2 2.2H19a1.5 1.5 0 0 1 1.5 1.5v8.8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" />
+          </svg>
+        </button>
+        <button
           v-if="!sourceModeActive"
           class="icon-button"
           type="button"
@@ -833,6 +862,20 @@ onBeforeUnmount(() => {
         :items="outlineItems"
         @close="emit('close-outline')"
         @select="slug => emit('select-outline-heading', slug)"
+      />
+    </Transition>
+
+    <Transition name="editor-sheet">
+      <FileSwitcherSheet
+        v-if="fileSwitcher"
+        :folder="fileSwitcher.folder"
+        :root-label="fileSwitcher.rootLabel"
+        :current-path="fileSwitcher.currentPath"
+        :entries="fileSwitcher.entries"
+        :error="fileSwitcher.error"
+        @close="emit('close-files')"
+        @up="emit('files-up')"
+        @open="entry => emit('files-open', entry)"
       />
     </Transition>
 
