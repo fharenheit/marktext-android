@@ -267,3 +267,79 @@ test('clones any Git host with a username and token that are remembered next tim
   expect(((await mockState(page)).credentials as Record<string, { password: string }>)['git.example.org'].password)
     .toBe('glpat-secret')
 })
+
+async function pullLatestFromEditor(page: Page) {
+  await page.getByTestId('editor-menu-button').click()
+  await page.getByTestId('pull-latest-button').click()
+}
+
+test('pulls the latest version into an edited document and merges both', async ({ page }) => {
+  await openRepository(page, {
+    pull: 'fast-forward',
+    incoming: { 'README.md': '# Notes (updated)\n\nfirst line\n' },
+  })
+  await editDocument(page, 'README.md', 'added on the phone')
+
+  await pullLatestFromEditor(page)
+  await expect(page.getByTestId('editor-host')).toContainText('Notes (updated)')
+  await expect(page.getByTestId('editor-host')).toContainText('added on the phone')
+  const state = await mockState(page)
+  expect((state.head as Record<string, string>)['README.md']).toBe('# Notes (updated)\n\nfirst line\n')
+  expect((state.files as Record<string, string>)['README.md']).toBe(
+    '# Notes (updated)\n\nfirst line\n\nadded on the phone\n',
+  )
+  await snapshot(page, 'repo-10-pull-merged')
+})
+
+test('a clashing pull asks, and "keep mine" keeps the edit while merging the rest', async ({ page }) => {
+  await openRepository(page, {
+    pull: 'fast-forward',
+    incoming: { 'docs/guide.md': '# Guide (v2)\n\nstep one, revised\n' },
+  })
+  await page.getByTestId('repository-entry-docs').click()
+  await page.getByTestId('repository-entry-docs/guide.md').click()
+  await expectEditorReady(page)
+  await page.getByTestId('editor-host').getByText('step one').click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' on the phone')
+  await expect.poll(async () => ((await mockState(page)).files as Record<string, string>)['docs/guide.md'])
+    .toContain('step one on the phone')
+
+  await pullLatestFromEditor(page)
+  await expect(page.getByTestId('merge-conflict-sheet')).toContainText('1')
+  await snapshot(page, 'repo-11-merge-conflict')
+  await page.getByTestId('merge-conflict-ours').click()
+
+  await expect(page.getByTestId('editor-host')).toContainText('Guide (v2)')
+  await expect(page.getByTestId('editor-host')).toContainText('step one on the phone')
+  expect(((await mockState(page)).files as Record<string, string>)['docs/guide.md']).toBe(
+    '# Guide (v2)\n\nstep one on the phone\n',
+  )
+})
+
+test('conflict markers land in the source pane of the split view', async ({ page }) => {
+  await openRepository(page, {
+    pull: 'fast-forward',
+    incoming: { 'README.md': '# Notes\n\nlaptop line\n' },
+  })
+  await page.getByTestId('repository-entry-README.md').click()
+  await expectEditorReady(page)
+  await page.getByTestId('editor-host').getByText('first line').click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' phone')
+  await expect.poll(async () => ((await mockState(page)).files as Record<string, string>)['README.md'])
+    .toContain('first line phone')
+
+  await pullLatestFromEditor(page)
+  await page.getByTestId('merge-conflict-markers').click()
+  const source = page.getByTestId('source-mode-editor')
+  await expect(source).toBeVisible()
+  await expect(page.getByTestId('editor-host')).toBeVisible()
+  await expect(source).toHaveValue(
+    /<<<<<<< my edits\nfirst line phone\n=======\nlaptop line\n>>>>>>> latest version/,
+  )
+  await snapshot(page, 'repo-12-conflict-markers')
+  // The raw markers are what gets saved, not a WYSIWYG re-serialization.
+  await expect.poll(async () => ((await mockState(page)).files as Record<string, string>)['README.md'])
+    .toContain('=======\nlaptop line\n>>>>>>> latest version')
+})

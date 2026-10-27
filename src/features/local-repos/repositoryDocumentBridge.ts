@@ -108,6 +108,50 @@ export async function revertRepositoryDocument(sourceUri: string) {
   )
 }
 
+/** The three sides of a pull-and-merge for one working-tree document. */
+export interface RepositoryDocumentMergeSides {
+  /** Last commit before the pull. */
+  base: string
+  /** The working-tree text before the pull (the user's uncommitted edits). */
+  ours: string
+  /** The file after the pull. */
+  theirs: string
+}
+
+/**
+ * Pulls the repository while keeping this document's uncommitted edits: the
+ * file goes back to its last commit so the pull can update it, and the three
+ * texts come back for a three-way merge. Every side is the on-disk text, so
+ * image links rewritten for the editor never read as changes. If the pull
+ * fails, the edits are written back before the error surfaces.
+ */
+export async function pullRepositoryDocumentForMerge(sourceUri: string): Promise<RepositoryDocumentMergeSides> {
+  const location = requireLocation(sourceUri)
+  const before = await callRepository(plugin =>
+    plugin.getRepositoryFileDiff({ id: location.repositoryId, path: location.path }),
+  )
+  const ours = before.newText ?? ''
+  // A file the last commit never had cannot be set aside by a checkout.
+  const setAside = before.oldText !== null && before.oldText !== before.newText
+  if (setAside) {
+    await revertRepositoryDocument(sourceUri)
+  }
+  try {
+    await callRepository(plugin => plugin.pullRepository({ id: location.repositoryId }))
+  } catch (error) {
+    if (setAside) {
+      await callRepository(plugin =>
+        plugin.writeRepositoryDocument({ id: location.repositoryId, path: location.path, markdown: ours }),
+      )
+    }
+    throw error
+  }
+  const after = await callRepository(plugin =>
+    plugin.getRepositoryFileDiff({ id: location.repositoryId, path: location.path }),
+  )
+  return { base: before.oldText ?? '', ours, theirs: after.newText ?? '' }
+}
+
 /**
  * Image sources of a repository document map to its working-tree files
  * (served to the WebView through Capacitor's file URL bridge).

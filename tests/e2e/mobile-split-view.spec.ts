@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openLocalDraft } from './helpers/drafts'
+import { getStoredDraftMarkdown, openLocalDraft } from './helpers/drafts'
 import { expectEditorReady } from './helpers/editor'
 
 const MARKDOWN = '# Split title\n\nSome **bold** text.\n\n```js\nconst answer = 42\n```\n\n- [x] done\n- [ ] todo\n'
@@ -16,68 +16,81 @@ async function toggleSplitView(page: Page) {
   await page.getByTestId('split-view-toggle-button').click()
 }
 
-test('shows the source and its rendered preview together and keeps edits', async ({ page }) => {
+test('source edits flow into the WYSIWYG pane without taking the keyboard', async ({ page }) => {
   await openLocalDraft(page, { id: 'split', title: 'Split title', markdown: MARKDOWN })
-
   await toggleSplitView(page)
   const source = page.getByTestId('source-mode-editor')
-  const preview = page.getByTestId('split-preview')
+  const wysiwyg = page.getByTestId('editor-host')
   await expect(source).toBeVisible()
-  await expect(preview).toBeVisible()
-  await expect(preview.locator('h1')).toHaveText('Split title')
-  await expect(preview.locator('strong')).toHaveText('bold')
-  await expect(preview.locator('pre code')).toContainText('const answer = 42')
-  await expect(preview.locator('input[type="checkbox"]')).toHaveCount(2)
-  await snapshot(page, 'split-01')
+  await expect(wysiwyg).toBeVisible()
+  await expect(wysiwyg.locator('h1')).toContainText('Split title')
 
-  // The preview stacks under the source on a phone.
+  // The source pane comes first and the WYSIWYG pane stacks under it on a phone.
   const sourceBox = (await source.boundingBox())!
-  const previewBox = (await preview.boundingBox())!
-  expect(previewBox.y).toBeGreaterThanOrEqual(sourceBox.y + sourceBox.height - 1)
+  const wysiwygBox = (await wysiwyg.boundingBox())!
+  expect(wysiwygBox.y).toBeGreaterThanOrEqual(sourceBox.y + sourceBox.height - 1)
 
   await source.click()
   await page.keyboard.press('Control+End')
   await page.keyboard.type('\n## Added *later*\n')
-  await expect(preview.locator('h2')).toHaveText('Added later')
-  await expect(preview.locator('h2 em')).toHaveText('later')
-  await snapshot(page, 'split-02-edited')
+  await expect(wysiwyg.locator('h2')).toContainText('Added')
+  await expect(wysiwyg.locator('h2 em')).toHaveText('later')
+  await expect(source).toBeFocused()
+  await snapshot(page, 'split-01-source-edit')
+})
 
-  // The menu entry now reads as checked; leaving returns to the WYSIWYG
-  // editor with the edit applied.
+test('WYSIWYG edits flow back into the source pane and both survive leaving', async ({ page }) => {
+  await openLocalDraft(page, { id: 'split', title: 'Split title', markdown: MARKDOWN })
+  await toggleSplitView(page)
+  const source = page.getByTestId('source-mode-editor')
+  const wysiwyg = page.getByTestId('editor-host')
+
+  await wysiwyg.getByText('Some').click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' Typed in WYSIWYG.')
+  await expect(source).toHaveValue(/Some \*\*bold\*\* text\. Typed in WYSIWYG\./)
+
+  await source.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type('\nFrom the source.\n')
+  await expect(wysiwyg).toContainText('From the source.')
+  await expect.poll(() => getStoredDraftMarkdown(page)).toContain('From the source.')
+  await snapshot(page, 'split-02-both-edited')
+
   await page.getByTestId('editor-menu-button').click()
   await expect(page.getByTestId('split-view-toggle-button')).toHaveAttribute('aria-checked', 'true')
   await page.getByTestId('split-view-toggle-button').click()
-  await expect(preview).toBeHidden()
   await expect(source).toBeHidden()
   await expectEditorReady(page)
-  // Muya shows the caret's block with its raw syntax, so match the words only.
-  await expect(page.getByTestId('editor-host').locator('h2')).toContainText('Added')
+  await expect(wysiwyg).toContainText('Typed in WYSIWYG.')
+  await expect(wysiwyg).toContainText('From the source.')
 })
 
-test('leaving source mode also closes the preview', async ({ page }) => {
+test('leaving source mode also closes the split', async ({ page }) => {
   await openLocalDraft(page, { id: 'split', title: 'Split title', markdown: MARKDOWN })
   await toggleSplitView(page)
-  await expect(page.getByTestId('split-preview')).toBeVisible()
+  await expect(page.getByTestId('editor-host')).toBeVisible()
 
   await page.getByTestId('editor-menu-button').click()
   await page.getByTestId('source-mode-toggle-button').click()
-  await expect(page.getByTestId('split-preview')).toBeHidden()
+  await expect(page.getByTestId('source-mode-editor')).toBeHidden()
   await expectEditorReady(page)
 
-  // Plain source mode shows no preview.
+  // Plain source mode hides the WYSIWYG pane.
   await page.getByTestId('editor-menu-button').click()
   await page.getByTestId('source-mode-toggle-button').click()
   await expect(page.getByTestId('source-mode-editor')).toBeVisible()
-  await expect(page.getByTestId('split-preview')).toHaveCount(0)
+  await expect(page.getByTestId('editor-host')).toBeHidden()
 })
 
-test('wide screens show the source and the preview side by side', async ({ page }) => {
+test('wide screens show the source and the WYSIWYG editor side by side', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 700 })
   await openLocalDraft(page, { id: 'split', title: 'Split title', markdown: MARKDOWN })
   await toggleSplitView(page)
   const sourceBox = (await page.getByTestId('source-mode-editor').boundingBox())!
-  const previewBox = (await page.getByTestId('split-preview').boundingBox())!
-  expect(previewBox.x).toBeGreaterThanOrEqual(sourceBox.x + sourceBox.width - 1)
-  expect(Math.abs(previewBox.y - sourceBox.y)).toBeLessThan(2)
+  const wysiwygBox = (await page.getByTestId('editor-host').boundingBox())!
+  expect(wysiwygBox.x).toBeGreaterThanOrEqual(sourceBox.x + sourceBox.width - 1)
+  expect(Math.abs(wysiwygBox.y - sourceBox.y)).toBeLessThan(2)
+  expect(Math.abs(wysiwygBox.width - sourceBox.width)).toBeLessThan(2)
   await snapshot(page, 'split-03-wide')
 })

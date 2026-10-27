@@ -109,6 +109,12 @@ export interface SourceModeController {
   exit(caret: SourceCaretRange | null): void
   /** Textarea input: keep the text and last caret, drive the edit pipeline. */
   updateText(next: string, caret: SourceCaretRange | null): void
+  /**
+   * Two-way split view: the WYSIWYG pane was edited, so mirror its markdown
+   * into the text without re-running the edit pipeline (the WYSIWYG change
+   * already drives it).
+   */
+  mirrorText(next: string): void
   /** Drop the mode without a hand-back (editor teardown; state already synced). */
   reset(): void
   /** Snapshot override while active: the textarea IS the document. */
@@ -234,6 +240,12 @@ export function createSourceModeController(
     options.onDocumentEdited()
   }
 
+  function mirrorText(next: string): void {
+    if (active.value) {
+      text.value = next
+    }
+  }
+
   function reset(): void {
     if (!active.value) {
       return
@@ -254,5 +266,5 @@ export function createSourceModeController(
     return active.value ? text.value : null
   }
 
-  return { active, text, entryCaretOffset, enter, exit, updateText, reset, activeText }
+  return { active, text, entryCaretOffset, enter, exit, updateText, mirrorText, reset, activeText }
 }

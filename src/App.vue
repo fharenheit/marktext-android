@@ -44,11 +44,15 @@ import RepositoryListScreen from './features/local-repos/RepositoryListScreen.vu
 import RepositoryScreen from './features/local-repos/RepositoryScreen.vue'
 import DocumentChangesView from './features/local-repos/DocumentChangesView.vue'
 import ConfirmSheet from './features/local-repos/ConfirmSheet.vue'
+import MergeConflictSheet from './features/local-repos/MergeConflictSheet.vue'
 import {
   getRepositoryDocumentChanges,
+  pullRepositoryDocumentForMerge,
   resolveRepositoryImageSource,
   revertRepositoryDocument,
 } from './features/local-repos/repositoryDocumentBridge'
+import { getRepositoryUserMessage } from './lib/localRepositories'
+import { threeWayMerge, type MergeConflictStrategy } from './lib/threeWayMerge'
 import { resolveGitHubImageSource } from './features/cloud-documents/githubImages'
 import type { GitHubDocumentLink } from './features/cloud-documents/githubLinks'
 import {
@@ -222,7 +226,6 @@ import {
   getAppearanceTextSettings,
   getAppearanceThemeSettings,
   getEditorStyleVars,
-  resolveEditorFontFamily,
 } from './features/settings/appearanceSettings'
 import { getAdvancedDiagnostics } from './features/settings/advancedDiagnostics'
 import {
@@ -764,18 +767,79 @@ function toggleSourceModeFromScreen(caret: { start: number, end: number } | null
   }
 }
 
-// Split view = source mode plus a read-only rendered preview. Leaving source
-// mode by any route (toggle, document switch, reset) also leaves the split.
+// Split view = source mode with the WYSIWYG editor beside it, both editable.
+// The textarea stays the document of record; edits flow from whichever pane
+// has focus into the other: textarea → Muya debounced through replaceContent,
+// Muya → textarea on each WYSIWYG change. Leaving source mode by any route
+// (toggle, document switch, reset) also leaves the split.
 const splitViewActive = ref(false)
+const SPLIT_SOURCE_TO_EDITOR_DELAY_MS = 250
+let splitSourceTimer: ReturnType<typeof setTimeout> | null = null
+// The last text that came from the WYSIWYG pane, so mirroring it into the
+// textarea does not bounce straight back into Muya.
+let splitTextFromEditor: string | null = null
+
+function wysiwygPaneHasFocus() {
+  const editor = getEditor()
+  return Boolean(editor && editor.domNode.contains(document.activeElement))
+}
+
+function flushSplitSourceToEditor() {
+  if (splitSourceTimer !== null) {
+    clearTimeout(splitSourceTimer)
+    splitSourceTimer = null
+  }
+  const editor = getEditor()
+  const text = sourceModeText.value
+  if (!editor || !splitViewActive.value || text === splitTextFromEditor || wysiwygPaneHasFocus()) {
+    return
+  }
+  editor.replaceContent(text, null)
+}
+
+watch(sourceModeText, () => {
+  if (!splitViewActive.value || sourceModeText.value === splitTextFromEditor) {
+    return
+  }
+  if (splitSourceTimer !== null) {
+    clearTimeout(splitSourceTimer)
+  }
+  splitSourceTimer = setTimeout(flushSplitSourceToEditor, SPLIT_SOURCE_TO_EDITOR_DELAY_MS)
+})
+
+/** A WYSIWYG edit in the split view: mirror it into the source pane. */
+function mirrorWysiwygEditIntoSource() {
+  if (!splitViewActive.value || !sourceModeActive.value || !wysiwygPaneHasFocus()) {
+    return
+  }
+  const markdown = getEditor()?.getMarkdown()
+  if (markdown != null && markdown !== sourceModeText.value) {
+    splitTextFromEditor = markdown
+    sourceMode.mirrorText(markdown)
+  }
+}
+
 watch(sourceModeActive, active => {
   if (!active) {
     splitViewActive.value = false
   }
 })
+watch(splitViewActive, active => {
+  if (!active) {
+    if (splitSourceTimer !== null) {
+      clearTimeout(splitSourceTimer)
+      splitSourceTimer = null
+    }
+    splitTextFromEditor = null
+  }
+})
 
 function toggleSplitViewFromScreen(caret: { start: number, end: number } | null) {
   if (splitViewActive.value) {
-    exitSourceMode(caret)
+    // Hand back whatever the textarea holds; when the WYSIWYG pane was the
+    // one being edited both already agree and its caret stays put.
+    flushSplitSourceToEditor()
+    exitSourceMode(wysiwygPaneHasFocus() ? null : caret)
     return
   }
   if (!sourceModeActive.value) {
@@ -786,11 +850,6 @@ function toggleSplitViewFromScreen(caret: { start: number, end: number } | null)
   splitViewActive.value = sourceModeActive.value
 }
 
-const splitPreviewTextStyle = computed(() => ({
-  fontFamily: resolveEditorFontFamily(appearanceTextSettings.value.editorFontFamily),
-  fontSize: `${appearanceTextSettings.value.fontSize}px`,
-  lineHeight: String(appearanceTextSettings.value.lineHeight),
-}))
 
 const {
   searchOpen: editorSearchOpen,
@@ -1125,6 +1184,7 @@ function syncMarkdown(nextStatus: unknown = 'Edited') {
   if (!hasEditor()) {
     return
   }
+  mirrorWysiwygEditIntoSource()
 
   const resolvedStatus = typeof nextStatus === 'string' ? nextStatus : 'Edited'
   const markDirty = resolvedStatus === 'Edited'
@@ -1756,6 +1816,112 @@ async function revertDocumentChanges() {
   } catch (error) {
     status.value = getAndroidDocumentUserMessage(error)
     androidDocumentLog.error('revert document failed', { sourceUri, error })
+  }
+}
+
+// --- Pull & merge: bring in the latest version while keeping the edits.
+// Working-copy files pull the repository; GitHub documents read the current
+// version on GitHub. Either way a three-way merge against the version the
+// edits started from combines both; clashing places are the user's call.
+
+const mergeConflictPrompt = ref<{
+  conflicts: number
+  resolve: (strategy: MergeConflictStrategy) => void
+} | null>(null)
+const pullingLatest = ref(false)
+
+function canPullLatestDocument() {
+  const sourceUri = documentState.value.sourceUri
+  return isRepositorySourceUri(sourceUri)
+    || (requiresExplicitCommit(sourceUri) && sourceUri !== null && getCloudDocumentBaseline(sourceUri) !== null)
+}
+
+function askMergeConflictStrategy(conflicts: number) {
+  return new Promise<MergeConflictStrategy>(resolve => {
+    mergeConflictPrompt.value = {
+      conflicts,
+      resolve: strategy => {
+        mergeConflictPrompt.value = null
+        resolve(strategy)
+      },
+    }
+  })
+}
+
+async function pullAndMergeLatest() {
+  closeEditorMenu()
+  const sourceUri = documentState.value.sourceUri
+  if (!sourceUri || pullingLatest.value) {
+    return
+  }
+  pullingLatest.value = true
+  status.value = t('pullMerge.pulling')
+  try {
+    // Settle the autosave so the working tree / recovery draft holds exactly
+    // the editor text, and keep it from racing the merged result.
+    await saveAndroidDocument({ waitForPendingSave: true })
+    clearAndroidDocumentSaveTimer()
+    const labels = { ours: t('pullMerge.labelMine'), theirs: t('pullMerge.labelLatest') }
+
+    let base: string
+    let ours: string
+    let theirs: string
+    let latest: OpenedAndroidDocument | null = null
+    if (isRepositorySourceUri(sourceUri)) {
+      ({ base, ours, theirs } = await pullRepositoryDocumentForMerge(sourceUri))
+    } else {
+      base = getCloudDocumentBaseline(sourceUri) ?? ''
+      ours = syncDocumentFromEditor(documentState.value.isDirty, true).markdown
+      latest = await readRoutedMarkdownDocument(sourceUri, androidMarkdownSettings.value)
+      theirs = latest.markdown
+    }
+
+    let merged = threeWayMerge(base, ours, theirs, { labels })
+    if (merged.conflicts > 0) {
+      const strategy = await askMergeConflictStrategy(merged.conflicts)
+      merged = threeWayMerge(base, ours, theirs, { labels, strategy })
+      if (strategy !== 'markers') {
+        merged = { ...merged, conflicts: 0 }
+      }
+    }
+
+    // Conflict markers are not Markdown-safe (a line above `=======` reads as
+    // a heading, `>>>>>>>` as quotes), so marked text never round-trips
+    // through the WYSIWYG engine: it lands in the source pane of the split
+    // view as is, where the user resolves it.
+    const marked = merged.conflicts > 0
+    if (latest === null) {
+      // Working copy: the merge result becomes the file, uncommitted.
+      if (merged.text !== theirs) {
+        await writeRoutedMarkdownDocument(sourceUri, merged.text, { encoding: markdownSaveSettings.value.encoding })
+      }
+      removeAndroidRecoveryDraft(sourceUri)
+      await openAndroidDocumentResult(await readRoutedMarkdownDocument(sourceUri, androidMarkdownSettings.value))
+    } else {
+      // GitHub: the latest version becomes the baseline the next commit
+      // builds on; the merged text goes on top as uncommitted edits.
+      await openAndroidDocumentResult(latest)
+      if (merged.text !== theirs && !marked) {
+        getEditor()?.replaceContent(merged.text, null)
+        syncMarkdown('Edited')
+      }
+    }
+
+    if (marked) {
+      enterSourceMode({ focus: false })
+      sourceMode.updateText(merged.text, null)
+      splitViewActive.value = sourceModeActive.value
+      status.value = t('pullMerge.conflictsMarked', { count: merged.conflicts })
+    } else {
+      status.value = theirs === base ? t('pullMerge.upToDate') : t('pullMerge.merged')
+    }
+  } catch (error) {
+    status.value = isRepositorySourceUri(sourceUri)
+      ? getRepositoryUserMessage(error)
+      : getAndroidDocumentUserMessage(error)
+    androidDocumentLog.error('pull and merge failed', { sourceUri, error })
+  } finally {
+    pullingLatest.value = false
   }
 }
 
@@ -3514,6 +3680,7 @@ onBeforeUnmount(() => {
     :can-commit="canCommitCurrentDocument() && documentState.isDirty"
     :can-show-changes="canShowDocumentChanges()"
     :can-revert-changes="canRevertDocumentChanges()"
+    :can-pull-latest="canPullLatestDocument()"
     :committing="committingDocument"
     :link-sheet-open="linkSheetOpen"
     :table-sheet-open="tableSheetOpen"
@@ -3552,8 +3719,6 @@ onBeforeUnmount(() => {
     :source-entry-caret="sourceModeEntryCaret"
     :source-focus-on-enter="sourceModeFocusOnEnter"
     :split-view-active="splitViewActive"
-    :preview-text-style="splitPreviewTextStyle"
-    :get-preview-editor="getEditor"
     @toggle-source-mode="toggleSourceModeFromScreen"
     @toggle-split-view="toggleSplitViewFromScreen"
     @update:source-text="
@@ -3587,6 +3752,7 @@ onBeforeUnmount(() => {
     @commit-android-exit="openCommitSheet(true)"
     @show-changes="showDocumentChanges"
     @revert-changes="requestRevertDocumentChanges"
+    @pull-latest="pullAndMergeLatest"
     @run-toolbar-command="runEditorToolbarCommand"
     @run-table-command="runEditorTableCommand"
     @run-selection-command="runEditorSelectionCommand"
@@ -3682,6 +3848,12 @@ onBeforeUnmount(() => {
     :can-revert="documentChanges.canRevert"
     @close="documentChanges = null"
     @revert="revertConfirmOpen = true"
+  />
+
+  <MergeConflictSheet
+    v-if="mergeConflictPrompt"
+    :conflicts="mergeConflictPrompt.conflicts"
+    @choose="mergeConflictPrompt.resolve"
   />
 
   <ConfirmSheet

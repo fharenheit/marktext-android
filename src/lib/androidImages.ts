@@ -62,11 +62,6 @@ function resolveImageSource(source: string) {
   return resolveMarkTextImageSource(source, imageDirectory) ?? documentImageResolver?.(source) ?? null
 }
 
-/** The WebView-loadable form of an image source, as the editor shows it; null when nothing maps it. */
-export function resolveDisplayImageSource(source: string) {
-  return resolveImageSource(source)
-}
-
 export function isAndroidImageImportAvailable() {
   return Capacitor.getPlatform() === 'android' && Capacitor.isNativePlatform()
 }

@@ -14,6 +14,7 @@ defineProps<{
   /** Repository and cloud documents: diff against the last commit or save. */
   canShowChanges: boolean
   canRevertChanges: boolean
+  canPullLatest?: boolean
   sharing: boolean
   exportingPdf: boolean
   savingToDevice: boolean
@@ -31,6 +32,7 @@ const emit = defineEmits<{
   commit: []
   'show-changes': []
   'revert-changes': []
+  'pull-latest': []
   'toggle-source-mode': []
   'toggle-split-view': []
 }>()
@@ -141,6 +143,22 @@ const { onModalKeydown } = useModalFocus({
             </svg>
           </span>
           <span class="editor-action-label">{{ t('editor.actions.revertChanges') }}</span>
+        </button>
+        <button
+          v-if="canPullLatest"
+          class="editor-action-row"
+          type="button"
+          role="menuitem"
+          data-testid="pull-latest-button"
+          @click="emit('pull-latest')"
+        >
+          <span class="editor-action-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 4v10M8 10l4 4 4-4" />
+              <path d="M6 20h12" />
+            </svg>
+          </span>
+          <span class="editor-action-label">{{ t('editor.actions.pullLatest') }}</span>
         </button>
         <button
           v-if="canShare"

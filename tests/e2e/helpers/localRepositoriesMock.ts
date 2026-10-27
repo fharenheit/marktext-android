@@ -7,8 +7,12 @@ export interface MockRepositoryFiles {
 export interface LocalRepositoriesMockOptions {
   /** HEAD (committed) contents; the working tree starts identical. */
   files: MockRepositoryFiles
-  /** What the next pull does. */
-  pull?: 'up-to-date' | 'conflict'
+  /**
+   * What the next pull does. 'fast-forward' brings `incoming` in as new
+   * commits, refusing (like JGit) when one of those files has uncommitted
+   * edits.
+   */
+  pull?: 'up-to-date' | 'conflict' | 'fast-forward'
   /** The other side of a conflicting pull, per path. */
   incoming?: MockRepositoryFiles
   /** Signs in a GitHub account (CloudDocuments mock) listing these `owner/repo` names. */
@@ -274,6 +278,19 @@ export async function installLocalRepositoriesMock(page: Page, options: LocalRep
           state.ahead = 0
           return Promise.resolve(status())
         case 'pullRepository': {
+          if (state.pull === 'fast-forward') {
+            const incoming = Object.entries(mockOptions.incoming ?? {})
+            const blocked = incoming.map(([file]) => file).filter(file => state.files[file] !== state.head[file])
+            if (blocked.length) {
+              return reject('LOCAL_CHANGES_BLOCK_PULL', 'Local changes would be overwritten', blocked)
+            }
+            state.pull = 'up-to-date'
+            for (const [file, theirs] of incoming) {
+              state.head[file] = theirs
+              state.files[file] = theirs
+            }
+            return Promise.resolve({ result: 'fast-forward', conflicts: [], status: status() })
+          }
           if (state.pull !== 'conflict') {
             return Promise.resolve({ result: 'up-to-date', conflicts: [], status: status() })
           }

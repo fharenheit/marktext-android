@@ -1094,9 +1094,10 @@ textarea {
   outline: none;
 }
 
-/* Split view: source and rendered preview side by side on wide screens
-   (tablets, unfolded foldables, phones in landscape); stacked on a narrow
-   portrait phone, where two columns would be unreadably thin. */
+/* Split view: the source textarea and the live WYSIWYG editor side by side
+   on wide screens (tablets, unfolded foldables, phones in landscape);
+   stacked on a narrow portrait phone, where two columns would be unreadably
+   thin. The source comes first (left / top). */
 .editor-pane-split {
   display: flex;
   flex-direction: column;
@@ -1104,7 +1105,7 @@ textarea {
 }
 
 .editor-pane-split > .source-mode-editor,
-.editor-pane-split > .split-preview {
+.editor-pane-split > .editor-host-shell {
   /* Equal 50% bases (not 0): with a zero basis the padded textarea would
      take its padding on top of an equal share. */
   flex: 1 1 50%;
@@ -1116,9 +1117,18 @@ textarea {
 }
 
 /* Each half is narrower than the single editor column, so the source drops
-   its wide-screen gutter. */
+   its wide-screen gutter and the editor its tall top padding. */
 .editor-pane-split > .source-mode-editor {
+  order: -1;
   padding: 12px 16px 32px;
+}
+
+.editor-pane-split > .editor-host-shell {
+  --editor-gutter: 16px;
+}
+
+.editor-pane-split > .editor-host-shell .mu-editor {
+  padding-top: 12px;
 }
 
 @media (min-width: 600px) {

@@ -14,8 +14,6 @@ import MobileSelectionToolbar from './components/MobileSelectionToolbar.vue'
 import LinkActionOverlay from './components/LinkActionOverlay.vue'
 import ResumeCard from './components/ResumeCard.vue'
 import EditorFailurePanel from './components/EditorFailurePanel.vue'
-import SplitPreview from './components/SplitPreview.vue'
-import type { MuyaEditor } from './editorRuntime'
 import type { SelectionToolbarCommandId } from './selectionToolbar'
 import type { TableCommandId } from './tableCommands'
 import type { SelectionToolbarRows } from './selectionToolbarSettings'
@@ -69,6 +67,7 @@ const props = defineProps<{
   committing: boolean
   canShowChanges: boolean
   canRevertChanges: boolean
+  canPullLatest?: boolean
   incomingOpenPromptOpen: boolean
   incomingOpenName: string
   textDirection: 'ltr' | 'rtl'
@@ -95,10 +94,8 @@ const props = defineProps<{
   sourceEntryCaret: number
   /** False for setting-driven auto-entry: opening a document must not pop the keyboard. */
   sourceFocusOnEnter: boolean
-  /** Source and rendered preview together; implies source mode. */
+  /** Source and WYSIWYG side by side, both editable; implies source mode. */
   splitViewActive?: boolean
-  previewTextStyle?: CSSProperties
-  getPreviewEditor?: () => MuyaEditor | null
 }>()
 
 const emit = defineEmits<{
@@ -128,6 +125,7 @@ const emit = defineEmits<{
   commit: []
   'show-changes': []
   'revert-changes': []
+  'pull-latest': []
   'run-toolbar-command': [commandId: MobileCommandId, restoreRange: Range | null]
   'run-table-command': [commandId: TableCommandId]
   'run-selection-command': [commandId: SelectionToolbarCommandId, restoreRange: Range | null]
@@ -193,16 +191,9 @@ function onToggleSplitView() {
   emit('toggle-split-view', props.sourceModeActive ? readSourceCaret() : null)
 }
 
-const splitPreview = ref<InstanceType<typeof SplitPreview> | null>(null)
-
-function onSourceScroll(event: Event) {
-  if (!props.splitViewActive) {
-    return
-  }
-  const area = event.target as HTMLTextAreaElement
-  const range = area.scrollHeight - area.clientHeight
-  splitPreview.value?.syncScroll(range > 0 ? area.scrollTop / range : 0)
-}
+// In the split view the WYSIWYG pane stays mounted and editable next to the
+// source textarea; everything WYSIWYG-only (toolbar, …) follows it.
+const wysiwygVisible = computed(() => !props.sourceModeActive || Boolean(props.splitViewActive))
 
 watch(
   () => props.sourceModeActive,
@@ -600,7 +591,7 @@ onBeforeUnmount(() => {
       :aria-hidden="linkSheetBackgroundAriaHidden"
     >
       <div
-        v-show="!sourceModeActive"
+        v-show="wysiwygVisible"
         ref="editorShell"
         class="editor-host-shell"
         :dir="textDirection"
@@ -627,16 +618,6 @@ onBeforeUnmount(() => {
         autocorrect="off"
         spellcheck="false"
         @input="onSourceInput"
-        @scroll.passive="onSourceScroll"
-      />
-
-      <SplitPreview
-        v-if="splitViewActive && sourceModeActive && getPreviewEditor"
-        ref="splitPreview"
-        :markdown="sourceText"
-        :dir="textDirection"
-        :text-style="previewTextStyle ?? {}"
-        :get-editor="getPreviewEditor"
       />
 
       <!-- Non-modal offer: never blocks the editor, never scrolls on its own. -->
@@ -689,7 +670,7 @@ onBeforeUnmount(() => {
     />
 
     <MobileEditorToolbar
-      v-if="toolbarVisible && !editorFailed && !sourceModeActive"
+      v-if="toolbarVisible && !editorFailed && wysiwygVisible"
       :aria-hidden="linkSheetBackgroundAriaHidden"
       :expanded="toolbarExpanded"
       :active-panel="toolbarPanel"
@@ -718,6 +699,7 @@ onBeforeUnmount(() => {
         :committing="committing"
         :can-show-changes="canShowChanges"
         :can-revert-changes="canRevertChanges"
+        :can-pull-latest="canPullLatest"
         :sharing="sharing"
         :exporting-pdf="exportingPdf"
         :saving-to-device="savingToDevice"
@@ -734,6 +716,7 @@ onBeforeUnmount(() => {
         @commit="emit('commit')"
         @show-changes="emit('show-changes')"
         @revert-changes="emit('revert-changes')"
+        @pull-latest="emit('pull-latest')"
       />
     </Transition>
 
